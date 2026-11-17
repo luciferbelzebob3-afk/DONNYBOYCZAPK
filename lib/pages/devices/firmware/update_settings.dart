@@ -1,0 +1,134 @@
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../../services/logging.dart';
+import '../../../services/settings/persist.dart';
+import 'directory.dart';
+
+/// Remembers the update channel and build variant the user picked, per
+/// firmware.
+///
+/// The controller that owns these is created in a widget's `initState` and
+/// disposed with it, so without this the choice was lost on leaving the page,
+/// not merely on restart - and the fallback then quietly reselected the
+/// release channel and the packaged variant next time.
+///
+/// Stored as one preference per firmware per field, following the convention
+/// the rest of the app uses for per-entity settings. A single JSON blob would
+/// mean one unreadable value could take every other firmware's settings down
+/// with it on the next write.
+class UpdateSettingsStore {
+  UpdateSettingsStore._();
+
+  static final UpdateSettingsStore instance = UpdateSettingsStore._();
+
+  static const String _prefix = 'firmware.update';
+
+  static String _channelPref(String shortName) => '$_prefix.$shortName.channel';
+
+  static String _variantPref(String shortName) => '$_prefix.$shortName.variant';
+
+  final Map<String, String> _channels = {};
+  final Map<String, UnleashedVariant> _variants = {};
+  Future<void>? _loading;
+
+  /// Reads once per process; later callers await the same read.
+  Future<void> load() => _loading ??= _load();
+
+  String? channelFor(String shortName) => _channels[shortName];
+
+  UnleashedVariant? variantFor(String shortName) => _variants[shortName];
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys()) {
+        if (!key.startsWith('$_prefix.')) continue;
+        // Per key, so a value of the wrong type - or one this build cannot
+        // make sense of - costs that one setting rather than the whole read.
+        try {
+          _read(prefs, key);
+        } catch (e) {
+          // Only a per-key type mismatch reaches here - a store that will
+          // not open throws from getInstance() into the catch below - so
+          // there is no batch to churn. SharedPreferences keeps no log of its
+          // own, and the only other sign is a selector back on its default.
+          LogService.warn('[UpdateSettings] "$key" unreadable: $e');
+        }
+      }
+    } catch (e) {
+      // Not one setting but all of them: every firmware falls back to the
+      // release channel and the packaged variant, which is the loss this
+      // class exists to stop.
+      LogService.warn('[UpdateSettings] load failed: $e');
+    }
+  }
+
+  void _read(SharedPreferences prefs, String key) {
+    final rest = key.substring(_prefix.length + 1);
+    final dot = rest.lastIndexOf('.');
+    if (dot <= 0) return;
+    final shortName = rest.substring(0, dot);
+    final value = prefs.getString(key);
+    if (value == null || value.isEmpty) return;
+    switch (rest.substring(dot + 1)) {
+      case 'channel':
+        _channels[shortName] = value;
+      case 'variant':
+        // A variant this build no longer has drops the variant and keeps the
+        // channel, rather than losing both.
+        final variant = UnleashedVariant.fromName(value);
+        if (variant != null) _variants[shortName] = variant;
+    }
+  }
+
+  /// Records whichever of [channelId] and [variant] is given.
+  ///
+  /// Only what the caller passes is written, so a fallback-derived channel the
+  /// user never chose is not persisted by a tap on the variant selector.
+  ///
+  /// Never throws: a preference that will not persist is worth one line in the
+  /// log and nothing more, and the caller has already applied the choice to
+  /// what is on screen.
+  Future<void> remember(
+    String shortName, {
+    String? channelId,
+    UnleashedVariant? variant,
+  }) async {
+    await load();
+    if (channelId != null) _channels[shortName] = channelId;
+    if (variant != null) _variants[shortName] = variant;
+    // One call per write, which is what persistSetting asks for and what
+    // these two want anyway: they are set independently, and a reader has to
+    // know which of them went back.
+    //
+    // persistSetting is what keeps the promise in the doc above, and its warn
+    // is the right level for this site rather than a choice made here: the
+    // choice is already on screen and will be gone next launch, with nothing
+    // else to say it never persisted. Not the error KnownDevices keeps for
+    // its save - that one is invisible until the device is wanted, this one
+    // is on screen the next time anyone opens the selector.
+    if (channelId != null) {
+      final pref = _channelPref(shortName);
+      await persistSetting(pref, (prefs) => prefs.setString(pref, channelId));
+    }
+    if (variant != null) {
+      final pref = _variantPref(shortName);
+      await persistSetting(
+        pref,
+        (prefs) => prefs.setString(pref, variant.name),
+      );
+    }
+  }
+
+  /// Forgets what was read, so one test does not inherit another's choices.
+  ///
+  /// Only the memo: the preferences themselves are the test's to set up, and
+  /// nothing else can un-memoise [load].
+  @visibleForTesting
+  void reset() {
+    _channels.clear();
+    _variants.clear();
+    _loading = null;
+  }
+}

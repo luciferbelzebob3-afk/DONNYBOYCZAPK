@@ -1,0 +1,272 @@
+// A ratchet on failures logged where a release build cannot see them.
+//
+// LogService.info is `keep: false`, so nothing sent there reaches the Settings
+// -> Log screen in any build; and infoOn const-folds to false in an ordinary
+// release build, so the call usually compiles away. LogService.info's own doc
+// has the full account, including why a talking build is no better. Where one
+// of these is the last word on a failure, the failure reports nowhere a reader
+// of a bug report can see. #103 holds the triage.
+//
+// Counting is the point, not forbidding. Whether a site is commentary or the
+// last word turns on what its caller does next, which no rule can see: of
+// the 117 #103 measured, it extrapolated roughly 45-50 as real debt and the
+// rest as already reported somewhere. So this stops the backlog growing
+// while #103 waits, and makes each slice of it a budget rather than an
+// intention.
+//
+// What it cannot see. The first is in lib/ and predates this; the rest are
+// what someone reaches for when the ratchet is inconvenient:
+//
+//  * A one-line wrapper - `void _log(m) => LogService.info(m)` called from a
+//    catch. Undetectable without following the call graph.
+//    lib/pages/devices/firmware/installer.dart:25 is one, and #119 is the
+//    failure that goes through it.
+//  * `finally { LogService.info(...) }`, the same failure in the block next
+//    door. Counting it would change what the number means, so it does not.
+//  * A cascade, `LogService..info(...)`, whose invocation has no target.
+//  * A closure passed as `onError:`. An invocation, but with no catch clause
+//    around it, which is the thing being counted. lib/ has three, one of them
+//    in an area declared empty below: device.dart's info stream, and two in
+//    pages/archive.
+//  * A failure reported from an `if` or a plain statement rather than a catch -
+//    a `ServiceRequestFailure` branch, a `return null` guard. The slices have
+//    raised several of those; they simply do not move this number.
+//
+// And two that make the number a proxy rather than a measure:
+//
+//  * A bare `catch (_) {}` - the same failure with less evidence. Deleting a
+//    counted log leaves one of those and lowers this number, which used to be
+//    the cheapest way to go green. `test/bare_catch_budget_test.dart` counts
+//    them now, so that trade is red on the other side and #117 is answered.
+//    What still has no test is the other direction: nothing asserts that a
+//    site a slice promoted actually reaches history.
+//  * A correct fix can move the number either way, because what replaces a
+//    counted site depends on the shape of the fix.
+//
+// In all of these the budget is what is wrong, and moving it with a word about
+// why is the answer.
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'ratchet.dart';
+
+/// What each area held when the ratchet went in. Lower one when a slice lands.
+///
+/// Per area rather than one total for two reasons: offsetting changes hide in a
+/// single number - services down three while apps goes up three is no change at
+/// all - and a failure can say where. Offsetting still hides *within* an area,
+/// which is the price of six buckets rather than 319.
+///
+/// The areas are also not the same kind of debt, and a number cannot say which
+/// is which - so each entry that differs says so itself. Someone editing this
+/// map to get CI green reads the line they are changing, not this paragraph.
+const Map<String, int> kBudget = {
+  // §5's re-ruling has landed: 23 of the 42 sites moved to `caught`, which is
+  // kept in every build. What is left is 19, and each one stayed for a reason
+  // its own comment at the site states - not because nobody looked.
+  //
+  // Every remaining site is one of three kinds, and none of them is the last
+  // word on an operation the user asked for:
+  //
+  //  * a poll - `watchInfo`'s battery and SD reads run every few seconds for
+  //    as long as a Flipper is connected, and the GPS responder sends one per
+  //    fix;
+  //  * one entry per item of a loop - a manifest per installed app, an app per
+  //    scan, a folder per Dolphin walk - where the useful record is a tally at
+  //    the batch boundary, which is what #194 added at `warn`;
+  //  * not a failure at all - a permission prompt an engine with no activity
+  //    cannot raise, and an install the user cancelled.
+  //
+  // The two that would otherwise qualify are the per-node `list` of a
+  // whole-SD walk and the per-file `md5 check`; §5 excludes both by name.
+  'services': 9,
+  'pages/archive': 2,
+  'pages/apps': 6,
+  'pages/tools': 2,
+};
+
+const String kIssue = 'https://github.com/DarkFlippers/qUnleashed/issues/103';
+
+/// Collects `LogService.info(...)` calls that sit inside a catch clause.
+///
+/// The analyzer decides what a catch clause is, which is why this parses. Dart
+/// spells an extension target and a mixin constraint `on Type {`, exactly like
+/// a bare catch clause. A text scan can be made to agree on today's tree - two
+/// were, before this existed - but it agrees by accident, and the accident does
+/// not survive the next `extension ... on ... {` that happens to log.
+class _CatchSiteVisitor extends RecursiveAstVisitor<void> {
+  _CatchSiteVisitor(this.unit);
+
+  final CompilationUnit unit;
+  final List<int> lines = [];
+  int _depth = 0;
+
+  @override
+  void visitCatchClause(CatchClause node) {
+    _depth += 1;
+    super.visitCatchClause(node);
+    _depth -= 1;
+  }
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (_depth > 0 &&
+        node.methodName.name == 'info' &&
+        isLogServiceCall(node)) {
+      lines.add(unit.lineInfo.getLocation(node.offset).lineNumber);
+    }
+    super.visitMethodInvocation(node);
+  }
+}
+
+/// The lines of the counted calls in [unit], in source order.
+List<int> catchSiteLinesIn(CompilationUnit unit) {
+  final visitor = _CatchSiteVisitor(unit);
+  unit.accept(visitor);
+  return visitor.lines;
+}
+
+/// Parses [source] and counts, for the rule's own tests.
+List<int> catchSiteLines(String source, {String? path}) =>
+    catchSiteLinesIn(parseUnit(source, path: path));
+
+void main() {
+  group('the rule', () {
+    test(
+      'is what the parser calls a catch clause, not what text looks like',
+      () {
+        // `on Type {` is also an extension target and a mixin constraint.
+        expect(
+          catchSiteLines(
+            "extension E on S { void f() { LogService.info(''); } }",
+          ),
+          isEmpty,
+        );
+        expect(
+          catchSiteLines("mixin M on B { void f() { LogService.info(''); } }"),
+          isEmpty,
+        );
+        expect(
+          catchSiteLines(
+            "void f() { try { g(); } catch (e) { LogService.info(''); } }",
+          ),
+          hasLength(1),
+        );
+        expect(
+          catchSiteLines(
+            "void f() { try { g(); } on E { LogService.info(''); } }",
+          ),
+          hasLength(1),
+        );
+      },
+    );
+
+    test('is only LogService.info, by whatever name it was imported', () {
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { LogService.error(''); } }",
+        ),
+        isEmpty,
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { other.info(''); } }",
+        ),
+        isEmpty,
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { LogService.information(''); } }",
+        ),
+        isEmpty,
+      );
+      // A prefixed import would otherwise zero out the file that used it.
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { log.LogService.info(''); } }",
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('follows the catch block wherever the call is nested', () {
+      // The shape ir_content_page.dart:84 actually has: a catch inside a
+      // closure passed as an argument. Without descending into every
+      // expression this site is lost and the count silently drops.
+      expect(
+        catchSiteLines(
+          "void f() { h(onTap: () { try { g(); } "
+          "catch (e) { LogService.info(''); } }); }",
+        ),
+        hasLength(1),
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { run(() { LogService.info(''); }); } }",
+        ),
+        hasLength(1),
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { try { h(); } "
+          "catch (x) { LogService.info(''); } } }",
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('stops counting once the catch block has closed', () {
+      // Pins that the depth counter comes back down. Nothing else here has a
+      // statement after a catch clause, so a leak would go unnoticed.
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } catch (e) { h(); } LogService.info(''); }",
+        ),
+        isEmpty,
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { LogService.info(''); } finally { h(); } }",
+        ),
+        isEmpty,
+      );
+      expect(
+        catchSiteLines(
+          "void f() { try { g(); } finally { LogService.info(''); } }",
+        ),
+        isEmpty,
+        reason: 'finally is the same failure next door, deliberately uncounted',
+      );
+    });
+
+    test('reports the line the call is on', () {
+      expect(
+        catchSiteLines(
+          'void f() {\n  try { g(); }\n  catch (e) {\n'
+          "    LogService.info('');\n  }\n}",
+        ),
+        [4],
+      );
+    });
+  });
+
+  test('no area logs more failures below the surviving levels than its budget', () {
+    final result = countAcrossLib((unit, _) => catchSiteLinesIn(unit));
+
+    expectWithinBudget(
+      counted: result.counted,
+      budget: kBudget,
+      sites: result.sites,
+      budgetFile: 'test/log_level_budget_test.dart',
+      why:
+          'LogService.info is not kept, and in an ordinary release build the '
+          'call compiles away - so a failure logged only there reports nowhere '
+          'a reader of a bug report can see.\n'
+          'If the new call is the last word on a failure, use warn or error. '
+          'If something else already reports it, raise kBudget in '
+          'test/log_level_budget_test.dart and say why.\n'
+          'See $kIssue',
+    );
+  });
+}

@@ -1,0 +1,303 @@
+import 'package:flutter/material.dart';
+
+import '../../../../components/icon.dart';
+import '../../../../theme/theme.dart';
+import '../../data/models/card.dart';
+import '../../data/models/category.dart';
+import '../../../../components/remote_image.dart';
+import 'category_chip.dart';
+import 'screenshot_frame.dart';
+
+class AppCardView extends StatefulWidget {
+  const AppCardView({
+    super.key,
+    required this.app,
+    this.category,
+    this.action,
+    this.onTap,
+    this.padding = 12,
+  });
+
+  final AppCard app;
+  final AppCategory? category;
+  final Widget? action;
+  final VoidCallback? onTap;
+  final double padding;
+
+  @override
+  State<AppCardView> createState() => _AppCardViewState();
+}
+
+class _AppCardViewState extends State<AppCardView> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final shots = widget.app.screenshots;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        decoration: BoxDecoration(
+          color: colors.card,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: _hover
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(33),
+                    blurRadius: 11,
+                    offset: const Offset(0, 1),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withAlpha(13),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(14),
+            child: Padding(
+              padding: EdgeInsets.all(widget.padding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _CardHeader(
+                    app: widget.app,
+                    category: widget.category,
+                    action: widget.action,
+                  ),
+                  const SizedBox(height: 8),
+                  _Description(text: widget.app.shortDescription),
+                  if (shots.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _ScreenshotsStrip(screenshots: shots),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Always two lines tall, so the screenshots below it land on the same spot on
+/// every card; anything longer is cut with an ellipsis on the second line.
+class _Description extends StatelessWidget {
+  const _Description({required this.text});
+
+  final String text;
+
+  static const double _fontSize = 12;
+  static const double _lineHeight = 1.3;
+  static const int _lines = 2;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final style = TextStyle(
+      fontSize: _fontSize,
+      height: _lineHeight,
+      color: colors.textSecondary,
+    );
+    final probe = TextPainter(
+      text: TextSpan(text: '\n', style: style),
+      maxLines: _lines,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final height = probe.size.height;
+    probe.dispose();
+    return SizedBox(
+      height: height,
+      child: Text(
+        text,
+        maxLines: _lines,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      ),
+    );
+  }
+}
+
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({
+    required this.app,
+    required this.category,
+    required this.action,
+  });
+
+  final AppCard app;
+  final AppCategory? category;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        AppIconBadge(url: app.iconUri, size: 48),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                app.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: colors.textPrimary,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              _CategoryInline(category: category),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: action ?? const _DefaultInstallButton(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class AppIconBadge extends StatelessWidget {
+  const AppIconBadge({
+    super.key,
+    required this.url,
+    this.size = 48,
+    this.borderRadius = 11,
+  });
+
+  final String url;
+  final double size;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = QIconBadgeStyle.of(context, context.appColors.accent);
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: style.background,
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: SizedBox(
+        width: size * 0.6,
+        height: size * 0.6,
+        child: FlipperRemoteImage(
+          url: url,
+          fit: BoxFit.contain,
+          tint: style.foreground,
+          placeholderColor: style.foreground,
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryInline extends StatelessWidget {
+  const _CategoryInline({required this.category});
+  final AppCategory? category;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final cat = category;
+    if (cat == null) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CategoryIcon(
+          category: cat,
+          color: colors.textSecondary,
+          size: 12,
+          gap: 4,
+        ),
+        Flexible(
+          child: Text(
+            cat.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: colors.textSecondary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ScreenshotsStrip extends StatelessWidget {
+  const _ScreenshotsStrip({required this.screenshots});
+  final List<String> screenshots;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 84,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const ClampingScrollPhysics(),
+        itemCount: screenshots.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, i) => ScreenshotFrame(url: screenshots[i]),
+      ),
+    );
+  }
+}
+
+class _DefaultInstallButton extends StatelessWidget {
+  const _DefaultInstallButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      height: 32,
+      width: double.infinity,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colors.accent,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        'INSTALL',
+        style: TextStyle(
+          color: colors.onAccent,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+}

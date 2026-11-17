@@ -1,0 +1,19 @@
+[submodule "components/nfc/tools/impl/src/main/cpp/nfc-tools"]
+	path = lib/modules/cpp/nfc-tools
+	url = https://github.com/flipperdevices/flipperzero-nfc-tools.git
+	branch = 808695143e7d6eb225398bcfd29e0009066e2c93
+[submodule "lib/modules/flipperlib"]
+	path = lib/modules/flipperlib
+	url = https://github.com/DarkFlippers/dart-flipperlib.git
+	branch = dev
+[submodule "lib/modules/dartufbt"]
+	path = lib/modules/dartufbt
+	url = https://github.com/DarkFlippers/dart-ufbt.git
+[submodule "lib/modules/irondash"]
+	path = lib/modules/irondash
+	url = https://github.com/DarkFlippers/irondash.git
+	branch = qunleashed
+[submodule "lib/modules/extensions"]
+	path = lib/modules/extensions
+	url = https://github.com/DarkFlippers/super_native_extensions.git
+	branch = qunleashed

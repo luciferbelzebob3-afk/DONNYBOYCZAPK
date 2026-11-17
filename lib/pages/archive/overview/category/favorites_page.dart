@@ -1,0 +1,594 @@
+import '../../../../services/archive/sort_settings.dart';
+import '../../../../services/guarded.dart';
+import '../../../../services/localization/l10n.dart';
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../../../theme/theme.dart';
+import '../controller.dart';
+import '../../../../components/archive/category.dart';
+import '../../../../components/archive/models/fap.dart';
+import '../../../../components/archive/models/key.dart';
+import '../../../../components/codec/fap/icon.dart';
+import '../../../../components/icon.dart';
+import '../../../../components/navigation.dart';
+import '../../../../components/selection.dart';
+import '../../../../components/notification.dart';
+import '../../widgets/actions_sheet.dart';
+import '../../../../components/filelist/empty_view.dart';
+import '../widgets/key_actions_sheet.dart';
+import '../../../../components/filelist/columns.dart';
+import '../../../../components/filelist/folder_sort.dart';
+import 'sort.dart';
+import '../../../../components/filelist/key_table.dart';
+import '../../../../components/filelist/list_scaffold.dart';
+import '../../../../components/filelist/table.dart';
+import '../../../../components/filelist/toolbar.dart';
+import '../failure_toast.dart';
+import '../../widgets/drag_source.dart';
+
+/// Lists everything starred — keys of every category plus the favorite apps
+/// read off the device — in the unified table used by the deleted page. Key
+/// rows carry their category icon and the columns common to all categories;
+/// app rows have no key metadata, so they trail the keys and leave those
+/// columns blank.
+class FavoritesPage extends StatefulWidget {
+  const FavoritesPage({
+    super.key,
+    required this.controller,
+    required this.sortSettings,
+  });
+
+  final ArchiveController controller;
+
+  /// Shared with every other archive table and owned by `AppShell`, so a sort
+  /// picked here is the one they all open in - and the rail's other mounted
+  /// tables follow it without being rebuilt by hand.
+  final ArchiveSortSettings sortSettings;
+
+  @override
+  State<FavoritesPage> createState() => _FavoritesPageState();
+}
+
+class _FavoritesPageState extends State<FavoritesPage>
+    with ListSelection<FavoritesPage> {
+  static const Color _starColor = Color(0xFFFFC107);
+
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  String _query = '';
+  String? _filterVal;
+
+  ArchiveController get _ctrl => widget.controller;
+
+  /// Rebuilds on either the archive's own changes or a sort picked on another
+  /// mounted table. Built once rather than per build, so the `AnimatedBuilder`
+  /// is not resubscribing to a fresh `Listenable` every frame.
+  late final Listenable _repaint = Listenable.merge([
+    _ctrl,
+    widget.sortSettings,
+  ]);
+
+  List<SortOption> get _sortOpts => sortOptionsFor(deletedColumns());
+
+  /// The stored sort, held to the keys this table's columns offer.
+  ({String key, bool asc}) get _sort =>
+      widget.sortSettings.resolve(_sortOpts.map((o) => o.key));
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      guarded('[Archive] load favourites meta', _ctrl.loadMetaForFavorites),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Starred keys of every category, in the category order of the rail.
+  List<ArchiveKey> _starredKeys() => [
+    for (final cat in ArchiveCategory.values)
+      ..._ctrl.keysFor(cat).where((k) => k.favorite),
+  ];
+
+  /// Distinct protocol tokens across the starred keys, feeding the filter menu.
+  /// A key's protocol may itself be a comma-joined list (e.g. infrared remotes),
+  /// so it is split into individual tokens.
+  List<String> _filterOptions(List<ArchiveKey> keys) {
+    final opts = <String>{};
+    for (final k in keys) {
+      opts.addAll(_protocolTokens(k));
+    }
+    return opts.toList()..sort();
+  }
+
+  List<String> _protocolTokens(ArchiveKey k) {
+    final raw = k.protocol;
+    if (raw == null || raw.isEmpty) return const [];
+    return [
+      for (final part in raw.split(','))
+        if (part.trim().isNotEmpty) part.trim(),
+    ];
+  }
+
+  List<ArchiveKey> _visibleKeys(List<ArchiveKey> keys) {
+    var out = keys;
+    if (_filterVal != null) {
+      out = out.where((k) => _protocolTokens(k).contains(_filterVal)).toList();
+    }
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      out = out.where((k) {
+        if (k.name.toLowerCase().contains(q)) return true;
+        if (k.subFolder.toLowerCase().contains(q)) return true;
+        if (k.category.title.toLowerCase().contains(q)) return true;
+        if (k.protocol?.toLowerCase().contains(q) ?? false) return true;
+        if (k.meta?.values.any((v) => v.toLowerCase().contains(q)) ?? false) {
+          return true;
+        }
+        return false;
+      }).toList();
+    }
+    final sort = _sort;
+    return sortArchiveKeys(out, sort.key, sort.asc);
+  }
+
+  /// Apps have no protocol, so an active protocol filter hides them all. They
+  /// carry a name and the folder under `/ext/apps` they were found in and
+  /// nothing else, so those two sorts are the ones they can follow; under any
+  /// other key they hold the name order.
+  List<FapFavorite> _visibleFaps(List<FapFavorite> faps) {
+    if (_filterVal != null) return const [];
+    var out = faps;
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      out = out.where((f) {
+        if (f.name.toLowerCase().contains(q)) return true;
+        if (f.subFolder.toLowerCase().contains(q)) return true;
+        return false;
+      }).toList();
+    }
+    final sort = _sort;
+    if (sort.key == 'folder') {
+      // One comparator carrying the name as its tiebreak, rather than a name
+      // sort with a folder sort laid over it. `List.sort` promises no
+      // stability at any length and measurably has none past 32 entries,
+      // where it leaves its insertion-sort path for a dual-pivot quicksort -
+      // so the second pass would hand back each folder's apps in whatever
+      // order it happened to leave them. A favourites list reaches 32.
+      return [...out]..sort(
+        (a, b) => compareFolderThenName(
+          folderSortKey(a.subFolder),
+          a.name.toLowerCase(),
+          folderSortKey(b.subFolder),
+          b.name.toLowerCase(),
+          sort.asc,
+        ),
+      );
+    }
+    // Under every other key the apps have nothing to answer with, so they hold
+    // the name order; only the name itself turns around with the direction.
+    final descending = sort.key == 'name' && !sort.asc;
+    return [...out]..sort((a, b) {
+      final byName = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return descending ? -byName : byName;
+    });
+  }
+
+  List<ArchiveKey> get _selectedKeys =>
+      _starredKeys().where((k) => isSelected(k.id)).toList();
+
+  void _onSort(String key) {
+    unawaited(
+      guarded(
+        '[ArchiveSort] storing the picked sort',
+        () =>
+            widget.sortSettings.pick(key, offered: _sortOpts.map((o) => o.key)),
+      ),
+    );
+  }
+
+  Future<void> _bulkUnstar() async {
+    await _ctrl.setKeysFavorite(_selectedKeys, false);
+    exitSelection();
+  }
+
+  Future<void> _showBulkActions(BuildContext context) async {
+    final keys = _selectedKeys;
+    if (keys.isEmpty) return;
+
+    final actions = <ActionItem>[
+      ActionItem(
+        icon: Icons.star_outline_rounded,
+        label: context.l10n.archiveUnstar,
+        onTap: _bulkUnstar,
+      ),
+      ...KeyActionsSheet.deleteActions(
+        context,
+        _ctrl,
+        keys,
+        onDone: exitSelection,
+      ),
+    ];
+
+    await ActionsSheet.show(
+      context,
+      leading: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: _starColor.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.star_rounded, color: _starColor, size: 22),
+      ),
+      title: context.l10n.archiveFilesSelected(keys.length),
+      subtitle: context.l10n.archiveFavorites,
+      actions: actions,
+    );
+  }
+
+  Future<void> _launchFap(FapFavorite fav) async {
+    if (!_ctrl.isConnected) {
+      context.showNotification(
+        context.l10n.archiveConnectToLaunch,
+        type: QNotificationType.warning,
+      );
+      return;
+    }
+    final ok = await _ctrl.launchFapFavorite(fav);
+    // Null: see launchFapFavorite. The tap that started it owns the outcome.
+    if (!mounted || ok == null) return;
+    if (ok) {
+      unawaited(openRoute(context, AppRoute.remoteControl));
+    } else {
+      context.showNotification(
+        withArchiveReason(
+          context,
+          context.l10n.archiveLaunchFailed(fav.name),
+          _ctrl.lastFailure,
+        ),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _showFapActions(BuildContext context, FapFavorite fav) {
+    final colors = context.appColors;
+    final icon = fav.icon;
+    return ActionsSheet.show(
+      context,
+      leading: icon != null
+          ? QIconBadge.xbm(
+              bytes: icon,
+              width: fapIconWidth,
+              height: fapIconHeight,
+              cacheKey: fav.remotePath,
+              color: colors.accent,
+              iconSize: 22,
+            )
+          : QIconBadge(
+              asset: 'assets/ic/app/apps.svg',
+              color: colors.accent,
+              iconSize: 22,
+            ),
+      title: fav.name,
+      subtitle: fav.remotePath,
+      actions: [
+        ActionItem(
+          icon: Icons.play_arrow_rounded,
+          label: context.l10n.archiveLaunch,
+          onTap: () => _launchFap(fav),
+        ),
+        ActionItem(
+          icon: Icons.star_outline_rounded,
+          label: context.l10n.archiveUnstar,
+          onTap: () => _ctrl.removeFapFavorite(fav),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final headerColor = colors.adaptCategoryHeader(_starColor);
+
+    return AnimatedBuilder(
+      animation: _repaint,
+      builder: (context, _) {
+        final allKeys = _starredKeys();
+        final allFaps = _ctrl.fapFavorites;
+        final filterOpts = _filterOptions(allKeys);
+        if (_filterVal != null && !filterOpts.contains(_filterVal)) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => setState(() => _filterVal = null),
+          );
+        }
+        final keys = _visibleKeys(allKeys);
+        final faps = _visibleFaps(allFaps);
+        // One record for the toolbar and the table both: two would be two
+        // chances to disagree about what a second tap on a column means. The
+        // getter behind it resolves the sort against this page's own columns,
+        // which allocates both lists, so it is read once here.
+        final resolved = _sort;
+        final sort = (
+          key: resolved.key,
+          asc: resolved.asc,
+          opts: _sortOpts,
+          onSort: _onSort,
+        );
+
+        return ArchiveListScaffold(
+          headerColor: headerColor,
+          title: const _FavoritesAppBarTitle(),
+          actions: [
+            CategoryCountBadge(
+              filtered: keys.length + faps.length,
+              total: allKeys.length + allFaps.length,
+            ),
+          ],
+          selection: selectionControl(
+            keys.map((k) => k.id),
+            onActions: () => _showBulkActions(context),
+          ),
+          toolbar: CategoryToolbar(
+            searchCtrl: _searchCtrl,
+            query: _query,
+            filterVal: _filterVal,
+            filterOpts: filterOpts,
+            sort: sort,
+            starredOnly: false,
+            catColor: headerColor,
+            colors: colors,
+            showStar: false,
+            onQueryChanged: (v) => setState(() => _query = v),
+            onFilterChanged: (v) => setState(() => _filterVal = v),
+            onStarredToggle: () {},
+          ),
+          body: ArchiveKeyTable(
+            // The columns are laid out against the keys alone: a favourite app
+            // row leaves the key-only columns blank, so it has no width of its
+            // own to contribute.
+            columns: (width) => layoutColumns(deletedColumns(), width, keys),
+            sort: sort,
+            selectionMode: selectionMode,
+            accent: headerColor,
+            onRefresh: _ctrl.refresh,
+            empty: () => ArchiveEmptyView(
+              icon: Icons.star_outline_rounded,
+              title: _query.isNotEmpty
+                  ? context.l10n.archiveEmptyQuery(_query)
+                  : _filterVal != null
+                  ? context.l10n.archiveNoFilesFilter
+                  : _ctrl.loading
+                  ? context.l10n.archiveLoading
+                  : context.l10n.archiveNoStarred,
+              subtitle: (_query.isNotEmpty || _filterVal != null)
+                  ? null
+                  : context.l10n.archiveStarHint,
+            ),
+            // Keys first, then the starred apps: one list, so the two kinds
+            // scroll together under one header.
+            itemCount: keys.length + faps.length,
+            itemBuilder: (i, cols) => i >= keys.length
+                ? _fapRow(faps[i - keys.length], cols, colors)
+                : _keyRow(keys[i], cols, colors),
+          ),
+        );
+      },
+    );
+  }
+
+  /// One key row. Built against the page's `context`, never a row's: the
+  /// actions sheet keeps the context it is given across its awaits and tests
+  /// `mounted` on it, and unstarring a key takes it off this page - so a sheet
+  /// opened with the row's context would report nothing. #110.
+  Widget _keyRow(ArchiveKey key, List<SizedColumn> cols, QAppColors colors) {
+    final id = key.id;
+    final selected = isSelected(id);
+    return ArchiveKeyDragSource(
+      key: ValueKey(id),
+      archiveKey: key,
+      selected: selected,
+      selection: () => _selectedKeys,
+      onDropped: exitSelection,
+      child: ArchiveTableRow(
+        flipperKey: key,
+        cols: cols,
+        colors: colors,
+        cat: key.category,
+        showCategoryIcon: true,
+        progress: _ctrl.progressForKey(key),
+        selectionMode: selectionMode,
+        selected: selected,
+        onTap: () => selectionMode
+            ? toggleSelect(id)
+            : KeyActionsSheet.show(
+                context,
+                _ctrl,
+                key,
+                onToggleFavorite: () => _ctrl.toggleFavorite(key),
+              ),
+        onLongPress: () =>
+            selectionMode ? toggleSelect(id) : enterSelection(id),
+      ),
+    );
+  }
+
+  /// A starred app, which is not an [ArchiveKey] and cannot be selected: the
+  /// bulk actions are all about keys, and an app's file lives wherever the
+  /// device put it.
+  Widget _fapRow(FapFavorite fap, List<SizedColumn> cols, QAppColors colors) {
+    return FileDragSource(
+      key: ValueKey(fap.remotePath),
+      file: DragFile(
+        id: fap.remotePath,
+        name: fap.fileName,
+        load: (progress) => _ctrl.exportBytes(
+          fap.remotePath,
+          onCancel: progress?.onCancel,
+          onProgress: progress?.updateProgress,
+        ),
+      ),
+      child: _FapTableRow(
+        favorite: fap,
+        cols: cols,
+        colors: colors,
+        selectionMode: selectionMode,
+        onTap: () => _launchFap(fap),
+        onLongPress: () => _showFapActions(context, fap),
+      ),
+    );
+  }
+}
+
+/// Favorite app row. Mirrors [ArchiveTableRow]'s geometry so both kinds of rows
+/// line up under the same header, with the key-only columns left blank.
+class _FapTableRow extends StatelessWidget {
+  const _FapTableRow({
+    required this.favorite,
+    required this.cols,
+    required this.colors,
+    required this.selectionMode,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final FapFavorite favorite;
+  final List<SizedColumn> cols;
+  final QAppColors colors;
+  final bool selectionMode;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: colors.card,
+      child: InkWell(
+        onTap: selectionMode ? null : onTap,
+        onLongPress: selectionMode ? null : onLongPress,
+        splashColor: colors.accent.withValues(alpha: 0.06),
+        highlightColor: colors.accent.withValues(alpha: 0.04),
+        child: Container(
+          height: kRowHeight,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: colors.divider.withValues(alpha: 0.6)),
+            ),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 8),
+              if (selectionMode)
+                const SizedBox(width: kSelectionIndicatorWidth),
+              for (final e in cols)
+                SizedBox(
+                  width: e.width,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: e.col.width == 0
+                        ? _nameCell()
+                        : _emptyCell(right: e.col.right),
+                  ),
+                ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _nameCell() {
+    final icon = favorite.icon;
+    final sub = favorite.subFolder;
+    return Row(
+      children: [
+        if (icon != null)
+          QIconBadge.xbm(
+            bytes: icon,
+            width: fapIconWidth,
+            height: fapIconHeight,
+            cacheKey: favorite.remotePath,
+            color: colors.accent,
+            size: 28,
+            iconSize: 16,
+            backgroundOpacity: 0.14,
+            borderRadius: 7,
+          )
+        else
+          QIconBadge(
+            asset: 'assets/ic/app/apps.svg',
+            color: colors.accent,
+            size: 28,
+            iconSize: 16,
+            backgroundOpacity: 0.14,
+            borderRadius: 7,
+          ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                favorite.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                sub.isEmpty ? '/apps/' : '/apps/$sub/',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textMuted, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyCell({required bool right}) {
+    return Align(
+      alignment: right ? Alignment.centerRight : Alignment.centerLeft,
+      child: Text('—', style: TextStyle(color: colors.textMuted, fontSize: 12)),
+    );
+  }
+}
+
+class _FavoritesAppBarTitle extends StatelessWidget {
+  const _FavoritesAppBarTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.star_rounded, color: Colors.white, size: 18),
+        const SizedBox(width: 8),
+        Text(
+          context.l10n.archiveFavorites,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}

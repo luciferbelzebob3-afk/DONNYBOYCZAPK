@@ -1,0 +1,1751 @@
+import 'dart:async';
+
+import '../../../services/localization/l10n.dart';
+import '../../../services/guarded.dart';
+import '../../../services/logging.dart';
+
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+import '../../../components/navigation.dart';
+import '../../../components/dialogs/name.dart';
+import '../../../components/name_rule.dart';
+import '../../../theme/theme.dart';
+
+import 'package:flipperlib/flipperlib.dart';
+
+import '../../../services/storage/fap_icons.dart' as icon_repo;
+import '../../../services/storage/picker_memory.dart';
+import '../../../components/folder_pick.dart';
+import '../../../components/notification.dart';
+import '../../../components/selection.dart';
+import '../../../components/codec/fap/icon.dart';
+import '../emulate/page.dart';
+import '../../../components/archive/category.dart';
+import '../../../components/archive/models/key.dart';
+import '../editor/open.dart';
+import 'share_remote_file.dart';
+import 'controller.dart';
+import 'columns.dart';
+import 'widgets/file_row.dart';
+import 'widgets/file_table.dart';
+import 'widgets/replace_dialog.dart';
+import '../widgets/drag_source.dart';
+import '../widgets/drop_region.dart';
+import '../widgets/actions_sheet.dart';
+import '../../../components/filelist/sync_progress_bar.dart';
+import '../../../components/filelist/empty_view.dart';
+import '../../../components/dialogs/connection.dart';
+import '../../devices/device_scope.dart';
+
+class _ClipEntry {
+  _ClipEntry({
+    required this.remotePath,
+    required this.name,
+    required this.isDir,
+    required this.size,
+  });
+
+  final String remotePath;
+  final String name;
+  final bool isDir;
+  final int size;
+}
+
+class _Clipboard {
+  _Clipboard({required this.items, required this.isCut});
+
+  final List<_ClipEntry> items;
+  final bool isCut;
+
+  String get label =>
+      items.length == 1 ? items.first.name : l10n.fmItemCount(items.length);
+}
+
+class FileManagerPage extends StatefulWidget {
+  const FileManagerPage({
+    super.key,
+    required this.client,
+    this.initialPath = '/ext',
+  });
+
+  /// The Flipper whose storage this browses. Required rather than defaulted:
+  /// every route into here is built with a context that has a DeviceScope
+  /// above it. ADR 0002.
+  final FlipperClient client;
+
+  final String initialPath;
+
+  @override
+  State<FileManagerPage> createState() => _FileManagerPageState();
+}
+
+class _FileManagerPageState extends State<FileManagerPage>
+    with ListSelection<FileManagerPage> {
+  late final FileManagerController _ctrl;
+  _Clipboard? _clipboard;
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  /// Name of the entry whose row should open in inline rename mode.
+  String? _pendingRenameName;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = FileManagerController(
+      client: widget.client,
+      initialPath: widget.initialPath,
+    );
+    _ctrl.refresh();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  // Which paths are mid-open. Opening a file downloads it and *then* pushes a
+  // route, and neither step cared that the last tap was still running - so on a
+  // desktop, where a double click is one gesture, a heavy file was fetched twice
+  // over and two identical viewers ended up stacked on the navigator, each to be
+  // dismissed separately.
+  //
+  // Keyed on the path rather than a single bool: opening two *different* files
+  // at once is legitimate, and a bare flag would have made the second one
+  // silently ignored.
+  final Set<String> _opening = {};
+
+  /// Opens a non-directory entry in whichever viewer suits it, once.
+  ///
+  /// Both doors come through here. There are two - the row tap and the actions
+  /// sheet's Edit - and Edit used to repeat this dispatch inline and never touch
+  /// [_opening], so "a path is opened once" held on one of them and not the
+  /// other.
+  Future<void> _openFile(RemoteEntry e) async {
+    final path = _ctrl.childPath(e.name);
+    if (!_opening.add(path)) return;
+    try {
+      if (e.extension == 'fap') {
+        await _launchFap(path);
+      } else if (_isPaintFile(e)) {
+        await _openPaintEditor(path);
+      } else {
+        await _openTextEditor(e);
+      }
+    } finally {
+      // Not in setState: nothing on screen reads this, and the viewer closing
+      // rebuilds the list anyway. Cleared even once the page has gone, so a
+      // path left in the set cannot wedge a later open of the same file.
+      _opening.remove(path);
+    }
+  }
+
+  Future<void> _onEntryTap(RemoteEntry e) async {
+    if (selectionMode) {
+      toggleSelect(e.name);
+      return;
+    }
+    if (e.isDir) {
+      // Not guarded: a listing is cheap, it replaces the view rather than
+      // stacking on it, and nothing is downloaded. The key would differ anyway -
+      // open() moves _path synchronously, so a second tap on the same folder
+      // computes a different child path.
+      await _ctrl.open(_ctrl.childPath(e.name));
+      return;
+    }
+    await _openFile(e);
+  }
+
+  Future<void> _navigateTo(String path) async {
+    exitSelection();
+    await _ctrl.open(path);
+  }
+
+  Future<bool> _handleBack() async {
+    if (selectionMode) {
+      exitSelection();
+      return false;
+    }
+    if (_ctrl.isSearching) {
+      _stopSearch();
+      return false;
+    }
+    if (_ctrl.canGoUp) {
+      await _ctrl.goUp();
+      return false;
+    }
+    return true;
+  }
+
+  /// Which of [entries] a selection can hold.
+  ///
+  /// A pending entry - a row standing in for an upload still on its way - is
+  /// left out: nothing in the bulk actions can act on a file the device does
+  /// not have yet, and `_selectAll` has always skipped them. The app bar's
+  /// toggle reads the same list, which it did not before: it asked whether
+  /// *every* row was selected, so with an upload in flight it offered "select
+  /// all" while the tap it labelled would deselect.
+  ///
+  /// Takes the list rather than reading `_ctrl.entries` itself, because
+  /// `entries` filters, concatenates and sorts on every call and `build`
+  /// already holds the answer. Lazy for the same reason: `allSelected` stops
+  /// at the first row that is not selected, which is the first one while
+  /// browsing, and a materialised list would pay for every row before the
+  /// question was asked.
+  static Iterable<String> _selectableNames(List<RemoteEntry> entries) =>
+      entries.where((e) => !e.pending).map((e) => e.name);
+
+  /// Selects everything selectable, or clears the selection if it already is.
+  ///
+  /// The off direction is [exitSelection] rather than a remove of the same
+  /// ids, so a name that has since left the listing cannot keep the toolbar up
+  /// with nothing visible under it.
+  void _selectAll() {
+    // Read twice below, so this one is a list.
+    final names = _selectableNames(_ctrl.entries).toList();
+    if (allSelected(names)) {
+      exitSelection();
+    } else {
+      setAllSelected(names, selected: true);
+    }
+  }
+
+  /// The selected rows a bulk action runs over.
+  ///
+  /// `!e.pending` as well as the selection, so a file the device is still
+  /// being written cannot be deleted or downloaded from under the transfer.
+  /// Two things would have to go wrong for that to be reachable - a selected
+  /// name would have to become pending, which needs the file to leave the
+  /// listing mid-selection - and the rows already refuse the gesture
+  /// (`file_table.dart` and `file_row.dart` null `onTap` and `onLongPress`
+  /// while pending). This is the layer that makes it true of the *action*
+  /// rather than of the gesture.
+  List<RemoteEntry> get _selectedEntries =>
+      _ctrl.entries.where((e) => !e.pending && isSelected(e.name)).toList();
+
+  void _stopSearch() {
+    _searchCtrl.clear();
+    _searchFocus.unfocus();
+    setState(() => _ctrl.setSearch(''));
+  }
+
+  /// The failure toast [message], with the reason the device gave appended.
+  ///
+  /// The controller keeps that reason in `lastFailure`, which a refresh does
+  /// not clear - unlike `error`, which is about the listing rather than about
+  /// what the user just asked for. Without this the page renders "Delete
+  /// failed" for a card that is full, a file that is open and a link that
+  /// went, and a bug report cannot tell them apart. #110.
+  String _because(String message) {
+    final reason = _ctrl.lastFailure;
+    return reason == null || reason.isEmpty
+        ? message
+        : context.l10n.fmFailedBecause(message, reason);
+  }
+
+  Future<void> _connect() async {
+    await promptConnectDevice(context);
+    if (!mounted || !_ctrl.client.isConnected) return;
+    await _ctrl.refresh();
+  }
+
+  Future<void> _launchFap(String remotePath) async {
+    bool ok;
+    try {
+      ok = await _ctrl.launchFap(remotePath);
+    } on FlipperRpcAppSystemLockedException {
+      if (mounted) _openRemoteControlBusy();
+      return;
+    } on FlipperRpcBusyException {
+      if (mounted) _openRemoteControlBusy();
+      return;
+    }
+    if (!mounted) return;
+    if (!ok) {
+      context.showNotification(
+        _because(context.l10n.fmLaunchFailed),
+        type: QNotificationType.error,
+      );
+      return;
+    }
+    unawaited(openRoute(context, AppRoute.remoteControl));
+  }
+
+  void _openRemoteControlBusy() {
+    context.showNotification(
+      context.l10n.fmDeviceBusy,
+      type: QNotificationType.error,
+    );
+    openRoute(context, AppRoute.remoteControl);
+  }
+
+  Future<void> _openTextEditor(RemoteEntry e) async {
+    if (!_mayDownload([e])) return;
+    final remotePath = _ctrl.childPath(e.name);
+    await openRemoteFileInEditor(
+      context,
+      remotePath: remotePath,
+      download: () => _ctrl.downloadTo(remotePath, expectedSize: e.size),
+      upload: (bytes) => _ctrl.writeBytes(remotePath, bytes),
+      failureReason: () => _ctrl.lastFailure,
+      cancelAcknowledged: _ctrl.cancelAcknowledged,
+      onRun: e.extension == 'js'
+          ? () => _emulateEntry(e, ArchiveCategory.javascript)
+          : null,
+    );
+    if (!mounted) return;
+    await _ctrl.refresh();
+  }
+
+  Future<void> _openPaintEditor(String remotePath) async {
+    await openRoute(
+      context,
+      AppRoute.pixelEditor,
+      args: PixelEditorArgs(remotePath: remotePath, client: _ctrl.client),
+    );
+  }
+
+  bool _isPaintFile(RemoteEntry e) =>
+      !e.isDir && const {'png', 'gif', 'bm'}.contains(e.extension);
+
+  /// Wraps an on-device file in an [ArchiveKey] (path preserved verbatim) and
+  /// opens the shared archive emulation flow.
+  void _emulateEntry(RemoteEntry e, ArchiveCategory cat) {
+    final remotePath = _ctrl.childPath(e.name);
+    final dot = e.name.lastIndexOf('.');
+    final name = dot > 0 ? e.name.substring(0, dot) : e.name;
+    final key = ArchiveKey(
+      name: name,
+      category: cat,
+      state: ArchiveKeyState.synced,
+      extension: e.extension,
+      remotePath: remotePath,
+    );
+    final client = DeviceScope.clientOf(context);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EmulatePage(flipperKey: key, client: client),
+      ),
+    );
+  }
+
+  /// Downloads [entries] (files and/or whole directory trees) into a folder the
+  /// user picks via the system file picker, recreating folders recursively.
+  Future<void> _downloadEntries(List<RemoteEntry> entries) async {
+    if (entries.isEmpty) {
+      context.showNotification(
+        context.l10n.fmNothingToDownload,
+        type: QNotificationType.warning,
+      );
+      return;
+    }
+    if (!_mayDownload(entries)) return;
+    // Null is a cancellation *or* a failure, and the two do not need telling
+    // apart here: [pickFolder] reports the failure itself, cause and all,
+    // before answering. Both of this page's folder picks used to say
+    // `fmFolderPickUnsupported` ("Choosing a folder is not supported on this
+    // platform") for every throw and record nothing, which was the wrong
+    // sentence for all but one of them - a platform with no picker is a
+    // `MissingPluginException`, and that is the one the shim still says it
+    // for. #353.
+    final destDir = await pickFolder(
+      context,
+      what: '[FileManager] the download folder pick',
+      dialogTitle: context.l10n.fmChooseDownloadLocation,
+      place: PickerPlace.disk,
+    );
+    if (!mounted || destDir == null || !_mayDownload(entries)) return;
+
+    final int failures;
+    try {
+      failures = await _ctrl.downloadEntriesTo(entries, destDir: destDir);
+    } on FlipperCancelledException catch (e) {
+      if (mounted) _notifyCancelled(e);
+      return;
+    }
+    if (!mounted || failures == 0) return;
+    final single = entries.length == 1 && !entries.single.isDir;
+    context.showNotification(
+      _because(
+        single
+            ? context.l10n.fmDownloadFailed
+            : context.l10n.fmDownloadFailedCount(failures),
+      ),
+      type: QNotificationType.error,
+    );
+  }
+
+  /// Whether [entries] may be downloaded now; if not, says why. Another
+  /// download of more than one frame is running, and there is no queue.
+  bool _mayDownload(Iterable<RemoteEntry> entries) {
+    if (_ctrl.canDownload(entries)) return true;
+    context.showNotification(
+      context.l10n.fmDownloadBusy,
+      type: QNotificationType.warning,
+    );
+    return false;
+  }
+
+  void _notifyCancelled(FlipperCancelledException e) {
+    final message = _cancelledMessage(e);
+    if (message == null) return;
+    context.showNotification(message, type: QNotificationType.warning);
+  }
+
+  /// Null when the firmware never acknowledged the cancel: the transfer
+  /// leaves the screen, but nothing claims it stopped.
+  String? _cancelledMessage(FlipperCancelledException e) =>
+      _ctrl.cancelAcknowledged(e) ? context.l10n.fmTransferCancelled : null;
+
+  Future<ConflictResolution?> _askReplace(
+    String destination,
+    int items,
+    List<FileConflict> conflicts,
+  ) {
+    if (!mounted) return Future.value();
+    return ReplaceFilesDialog.show(
+      context,
+      destination: destination,
+      items: items,
+      conflicts: conflicts,
+    );
+  }
+
+  Future<bool> _indexFapIcon(RemoteEntry e, {bool silent = false}) async {
+    final remotePath = _ctrl.childPath(e.name);
+    final appId = e.name.toLowerCase().endsWith('.fap')
+        ? e.name.substring(0, e.name.length - 4)
+        : e.name;
+
+    if (!silent) context.showNotification(context.l10n.fmIndexingIcon(e.name));
+    final bytes = await _ctrl.readBytes(remotePath);
+    if (!mounted) return false;
+    if (bytes == null) {
+      if (!silent) {
+        context.showNotification(
+          context.l10n.fmDownloadFailedFor(e.name),
+          type: QNotificationType.error,
+        );
+      }
+      return false;
+    }
+
+    final extracted = extractFapIcon(Uint8List.fromList(bytes));
+    final icon = extracted?.icon;
+    if (icon == null) {
+      if (!silent) {
+        context.showNotification(
+          context.l10n.fmNoIconIn(e.name),
+          type: QNotificationType.warning,
+        );
+      }
+      return false;
+    }
+
+    // Writing bumps icon_repo.fapIconRevision, which the file rows listen to,
+    // so the icon refreshes immediately without recreating the page.
+    await icon_repo.writeFapIcon(appId, icon);
+    if (!mounted || silent) return true;
+    context.showNotification(
+      context.l10n.fmIconIndexed(
+        extracted?.name.isNotEmpty == true ? extracted!.name : appId,
+      ),
+      type: QNotificationType.good,
+    );
+    return true;
+  }
+
+  /// True when every one of [items] is a `.fap`, which is the only case where
+  /// batch icon indexing makes sense.
+  ///
+  /// Asks about the list the sheet is built from rather than about the
+  /// selection: `_selectedEntries` drops a pending row, so a selection of one
+  /// can arrive here empty - and `every` over nothing is true, which would put
+  /// the entry in the sheet over no files at all.
+  static bool _allFap(List<RemoteEntry> items) =>
+      items.isNotEmpty && items.every((e) => !e.isDir && e.extension == 'fap');
+
+  Future<void> _indexFapIconsSelected() async {
+    final items = _selectedEntries;
+    if (items.isEmpty) return;
+    context.showNotification(context.l10n.fmIndexingIcons(items.length));
+    var indexed = 0;
+    for (final e in items) {
+      if (await _indexFapIcon(e, silent: true)) indexed++;
+      if (!mounted) return;
+    }
+    exitSelection();
+    context.showNotification(
+      indexed == items.length
+          ? context.l10n.fmIndexedIcons(indexed)
+          : context.l10n.fmIndexedPartial(indexed, items.length),
+      type: indexed == items.length
+          ? QNotificationType.good
+          : QNotificationType.warning,
+    );
+  }
+
+  Future<void> _deleteEntry(RemoteEntry e, {bool recursive = false}) async {
+    final ok = await _confirm(context.l10n.fmDeleteOne(e.name));
+    if (!ok) return;
+    final remotePath = _ctrl.childPath(e.name);
+    final success = await _ctrl.delete(remotePath, recursive: recursive);
+    if (success) await _ctrl.refresh();
+    if (!mounted) return;
+    if (!success) {
+      context.showNotification(
+        _because(context.l10n.fmDeleteFailed),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final items = _selectedEntries;
+    if (items.isEmpty) return;
+    final ok = await _confirm(context.l10n.fmDeleteMany(items.length));
+    if (!ok) return;
+    var failures = 0;
+    for (final e in items) {
+      final done = await _ctrl.delete(
+        _ctrl.childPath(e.name),
+        recursive: e.isDir,
+      );
+      if (!done) failures++;
+    }
+    exitSelection();
+    await _ctrl.refresh();
+    if (!mounted) return;
+    context.showNotification(
+      failures == 0
+          ? context.l10n.fmDeletedMany(items.length)
+          : _because(context.l10n.fmDeleteFailedCount(failures)),
+      type: failures == 0 ? QNotificationType.good : QNotificationType.error,
+    );
+  }
+
+  Future<void> _downloadSelected() async {
+    final items = _selectedEntries;
+    await _downloadEntries(items);
+    exitSelection();
+  }
+
+  void _renameSelected() {
+    final items = _selectedEntries;
+    if (items.length != 1) return;
+    final name = items.first.name;
+    exitSelection();
+    setState(() => _pendingRenameName = name);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pendingRenameName = null;
+    });
+  }
+
+  Future<void> _renameEntry(RemoteEntry e, String newName) async {
+    final from = _ctrl.childPath(e.name);
+    final to = _ctrl.childPath(newName);
+    final ok = await _ctrl.rename(from, to);
+    if (ok) {
+      _pendingRenameName = null;
+      await _ctrl.refresh();
+    }
+    if (!mounted) return;
+    if (!ok) {
+      context.showNotification(
+        _because(context.l10n.fmRenameFailed),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  /// Picks a free name based on [base] (e.g. `new.txt`, `new1.txt`, …) within
+  /// the current directory so creating a file never clobbers an existing one.
+  ///
+  /// [base] has to be a name `deviceNameRule` already accepts: this appends a
+  /// counter and nothing more, so a base the Flipper refuses stays refused.
+  /// Every caller passes a literal, which is why that is a note and not a
+  /// check.
+  String _uniqueName(String base) {
+    final taken = _ctrl.entries.map((e) => e.name).toSet();
+    if (!taken.contains(base)) return base;
+    final dot = base.lastIndexOf('.');
+    final stem = dot > 0 ? base.substring(0, dot) : base;
+    final ext = dot > 0 ? base.substring(dot) : '';
+    var i = 1;
+    while (taken.contains('$stem$i$ext')) {
+      i++;
+    }
+    return '$stem$i$ext';
+  }
+
+  Future<void> _createEmptyFile() async {
+    final name = _uniqueName('new.txt');
+    final bool ok;
+    try {
+      ok = await _ctrl.writeBytes(_ctrl.childPath(name), const <int>[]);
+    } on FlipperCancelledException catch (e) {
+      if (mounted) _notifyCancelled(e);
+      return;
+    }
+    if (!mounted) return;
+    if (!ok) {
+      context.showNotification(
+        _because(context.l10n.fmCreateFileFailed),
+        type: QNotificationType.error,
+      );
+      return;
+    }
+    _pendingRenameName = name;
+    await _ctrl.refresh();
+  }
+
+  _ClipEntry _clip(RemoteEntry e) => _ClipEntry(
+    remotePath: _ctrl.childPath(e.name),
+    name: e.name,
+    isDir: e.isDir,
+    size: e.size,
+  );
+
+  void _setClipboard(List<RemoteEntry> entries, {required bool isCut}) {
+    if (entries.isEmpty) return;
+    setState(() {
+      _clipboard = _Clipboard(items: entries.map(_clip).toList(), isCut: isCut);
+    });
+  }
+
+  void _copyEntry(RemoteEntry e) => _setClipboard([e], isCut: false);
+
+  void _cutEntry(RemoteEntry e) => _setClipboard([e], isCut: true);
+
+  void _copySelected() {
+    _setClipboard(_selectedEntries, isCut: false);
+    exitSelection();
+  }
+
+  void _moveSelected() {
+    _setClipboard(_selectedEntries, isCut: true);
+    exitSelection();
+  }
+
+  Future<void> _paste() async {
+    final cb = _clipboard;
+    if (cb == null) return;
+    var failures = 0;
+    final toCopy = <_ClipEntry>[];
+    for (final item in cb.items) {
+      final dest = _ctrl.childPath(item.name);
+      // Skip a no-op paste into the item's own source folder.
+      if (dest == item.remotePath) {
+        failures++;
+        continue;
+      }
+      // Try a fast in-place rename first; it can't span storage roots
+      // (e.g. /ext → /int), so fall back to copy-then-delete.
+      if (cb.isCut && await _ctrl.rename(item.remotePath, dest)) continue;
+      toCopy.add(item);
+    }
+    FlipperCancelledException? cancelled;
+    if (toCopy.isNotEmpty) {
+      try {
+        failures += await _ctrl.copyInto(
+          [
+            for (final item in toCopy)
+              (path: item.remotePath, isDir: item.isDir, size: item.size),
+          ],
+          move: cb.isCut,
+          resolve: _askReplace,
+        );
+      } on FlipperCancelledException catch (e) {
+        cancelled = e;
+      }
+    }
+    if (mounted) setState(() => _clipboard = null);
+    await _ctrl.refresh();
+    if (!mounted) return;
+    if (cancelled != null) {
+      _notifyCancelled(cancelled);
+    } else if (failures == 0) {
+      context.showNotification(
+        cb.isCut
+            ? context.l10n.fmMovedMany(cb.items.length)
+            : context.l10n.fmCopiedMany(cb.items.length),
+        type: QNotificationType.good,
+      );
+    } else {
+      context.showNotification(
+        cb.isCut
+            ? _because(context.l10n.fmMoveFailedCount(failures))
+            : _because(context.l10n.fmCopyFailedCount(failures)),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _createFolder() async {
+    // QNameDialog rather than the hand-rolled prompt this had: that one
+    // validated nothing, so `gate/one` went to `mkdir` and came back as
+    // "Create folder failed" with no cause named. #277
+    final name = await QNameDialog.show(
+      context,
+      title: context.l10n.fmNewFolder,
+      // A folder name, so nothing is appended to it: the volume's own rule.
+      rule: deviceNameRule,
+      // The collision, which is this prompt's own business rather than the
+      // storage's - and the last place in #277's list that still answered a
+      // name it could not use with a failure naming no cause. `mkdir` onto an
+      // existing folder fails, and this call site does not read the reason.
+      validate: (value) => _ctrl.entries.any((e) => e.name == value.trim())
+          ? context.l10n.fmConflictRenameTaken
+          : null,
+      hintText: context.l10n.fmFolderName,
+      confirmLabel: context.l10n.fmCreate,
+    );
+    // Null is a dismissal. The dialog cannot answer with an empty name, so
+    // nothing here checks for one.
+    if (name == null) return;
+    final ok = await _ctrl.mkdir(name);
+    if (ok) await _ctrl.refresh();
+    if (!mounted) return;
+    if (!ok) {
+      context.showNotification(
+        context.l10n.fmCreateFolderFailed,
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  /// Picks files and uploads them, reporting a refused pick.
+  ///
+  /// **Reached through `guarded`, not a bare call**, like `_onEntryTap` and
+  /// `_openFile` on this page. The pick catches for itself now, but the upload
+  /// behind it does not: `_upload` catches only `FlipperCancelledException`,
+  /// and `uploadLocal`'s planning pass stats every chosen path and lists the
+  /// folder with nothing around either. A cache copy evicted between the pick
+  /// and the stat - the same provider misbehaviour that produced
+  /// QUNLEASHED-K's `unknown_path` - rejects out of here, and from a bare call
+  /// that reaches the zone as a fatal naming nothing.
+  ///
+  /// CLAUDE.md names that shape, and **nothing mechanical holds it**:
+  /// `unawaited_budget_test.dart` counts the literal `unawaited(...)` and
+  /// lists a future dropped without one under what it cannot see, on the
+  /// grounds that `unawaited_futures` covers it - and that lint fires only in
+  /// an `async` body, which a tap closure is not. #23 has the gap.
+  Future<void> _uploadFromPath() async {
+    final List<PlatformFile> picked;
+    try {
+      // `pickFiles`, which picks several: this is the one surface that means
+      // it.
+      picked = await FilePicker.pickFiles(
+        initialDirectory: await pickerStart(PickerPlace.disk),
+      );
+    } catch (e, st) {
+      // The pick rejects rather than answering, and this is reached from a
+      // `ListTile.onTap` - so before this catch the rejection had no listener
+      // anywhere, reached the zone as a fatal uncaught error, and the app died
+      // behind the picker the user was still looking at.
+      //
+      // QUNLEASHED-K was Android's `unknown_path`: `FileUtils.openFileStream`
+      // answered null for the chosen item, so the delegate failed the whole
+      // call.
+      //
+      // **#354's case now arrives here too, and that is upstream's doing.**
+      // It used to be a success carrying no files, which read as a cancel;
+      // `android_file_picker` 2.1.1 changed `handleFileResult` to answer
+      // `unknown_path` when none of the chosen files can be read, so a pick
+      // the platform emptied is a rejection and this catch reports it. The
+      // sentence a user sees is the one #354 asked for, by a different route.
+      //
+      // A *partial* drop is still not answered and cannot be from this side:
+      // the chosen count never crosses the method channel, so nothing here can
+      // subtract. #354 keeps that half, which wants the delegate to report
+      // selected-versus-returned.
+      _pickFailed('the file pick failed: ${LogService.describe(e, st)}');
+      return;
+    }
+    // Empty is the cancellation, and in 13.x it is only that. Every
+    // implementation maps the channel's null to `[]`, and on Android nothing
+    // else can produce an empty list any more - `handleFileResult` errors
+    // instead, which is the previous branch's business. So returning here is
+    // not the silence #354 was about.
+    if (picked.isEmpty) return;
+    final paths = [
+      for (final file in picked)
+        if (file.path != null) file.path!,
+    ];
+    if (paths.isNotEmpty) {
+      await rememberPickedFile(PickerPlace.disk, paths.first);
+    }
+    await _upload(paths, skipped: picked.length - paths.length);
+  }
+
+  /// Records [line] and tells the user the pick failed.
+  ///
+  /// The two ways a file pick comes back with nothing - a rejection and a
+  /// result the platform emptied - report the same way, and the shim one file
+  /// over does the same thing for the folder picks. The sentence carries no
+  /// cause, so [line] is what tells the two apart in a report.
+  void _pickFailed(String line) {
+    LogService.caught('[FileManager] $line');
+    if (mounted) {
+      context.showNotification(
+        context.l10n.commonPickFailed,
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _uploadFolder() async {
+    final dir = await pickFolder(
+      context,
+      what: '[FileManager] the upload folder pick',
+      dialogTitle: context.l10n.fmChooseFolderToUpload,
+      place: PickerPlace.disk,
+    );
+    if (!mounted || dir == null) return;
+    await _upload([dir]);
+  }
+
+  Future<void> _uploadDropped(List<String> paths) async {
+    if (!_ctrl.client.isConnected) {
+      context.showNotification(
+        context.l10n.fmNotConnected,
+        type: QNotificationType.error,
+      );
+      return;
+    }
+    await _upload(paths);
+  }
+
+  Future<void> _upload(List<String> paths, {int skipped = 0}) async {
+    final ({int files, int failed}) result;
+    try {
+      result = await _ctrl.uploadLocal(paths, resolve: _askReplace);
+    } on FlipperCancelledException catch (e) {
+      await _ctrl.refresh();
+      if (mounted) _notifyCancelled(e);
+      return;
+    }
+    await _ctrl.refresh();
+    if (!mounted) return;
+    final failures = result.failed + skipped;
+    if (failures > 0) {
+      // `lastFailure` rather than `error`, which the refresh above has just
+      // nulled - this line rendered "Upload failed for 1 file(s): " with an
+      // empty slot for as long as the two were in that order. Reading the
+      // reason after the refresh is now simply safe, rather than something
+      // every call site has to remember. #110.
+      context.showNotification(
+        context.l10n.fmUploadFailedCount(failures, _ctrl.lastFailure ?? ''),
+        type: QNotificationType.error,
+      );
+    } else {
+      context.showNotification(
+        context.l10n.fmUploaded(result.files),
+        type: QNotificationType.good,
+      );
+    }
+  }
+
+  // ─── Dialogs ───────────────────────────────────────────────────────────────
+
+  Future<bool> _confirm(String title) async {
+    final colors = context.appColors;
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: colors.dialogBackground,
+            title: Text(title, style: TextStyle(color: colors.dialogText)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(context.l10n.commonCancel),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(
+                  context.l10n.commonDelete,
+                  style: TextStyle(color: colors.danger),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  void _showSortSheet() {
+    final colors = context.appColors;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: colors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        Widget tile(String label, FileSortMode mode) {
+          final active = _ctrl.sortMode == mode;
+          return ListTile(
+            leading: Icon(
+              active
+                  ? (_ctrl.sortAscending
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward)
+                  : Icons.sort,
+              color: active ? colors.accent : colors.textMuted,
+            ),
+            title: Text(
+              label,
+              style: TextStyle(
+                color: active ? colors.accent : colors.textPrimary,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+            onTap: () {
+              _ctrl.setSortMode(mode);
+              Navigator.of(sheetCtx).pop();
+            },
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    context.l10n.fmSortBy,
+                    style: TextStyle(
+                      color: colors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+              tile(context.l10n.fmSortName, FileSortMode.name),
+              tile(context.l10n.fmSortSize, FileSortMode.size),
+              tile(context.l10n.fmSortType, FileSortMode.type),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFabMenu() {
+    final colors = context.appColors;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: colors.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: colors.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.note_add_outlined, color: colors.textPrimary),
+              title: Text(
+                context.l10n.fmNewFile,
+                style: TextStyle(color: colors.textPrimary),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                guarded('[FileManager] creating a file', _createEmptyFile);
+              },
+            ),
+            ListTile(
+              leading: SvgPicture.asset(
+                'assets/ic/action/create-folder.svg',
+                width: 22,
+                height: 22,
+                colorFilter: ColorFilter.mode(
+                  colors.textPrimary,
+                  BlendMode.srcIn,
+                ),
+              ),
+              title: Text(
+                context.l10n.fmNewFolder,
+                style: TextStyle(color: colors.textPrimary),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                guarded('[FileManager] creating a folder', _createFolder);
+              },
+            ),
+            ListTile(
+              leading: SvgPicture.asset(
+                'assets/ic/action/upload.svg',
+                width: 22,
+                height: 22,
+                colorFilter: ColorFilter.mode(
+                  colors.textPrimary,
+                  BlendMode.srcIn,
+                ),
+              ),
+              title: Text(
+                context.l10n.fmUploadFiles,
+                style: TextStyle(color: colors.textPrimary),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                guarded(
+                  '[FileManager] uploading picked files',
+                  _uploadFromPath,
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.drive_folder_upload_outlined,
+                color: colors.textPrimary,
+              ),
+              title: Text(
+                context.l10n.fmUploadFolder,
+                style: TextStyle(color: colors.textPrimary),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                guarded(
+                  '[FileManager] uploading a picked folder',
+                  _uploadFolder,
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Build ───────────────────────────────────────────────────────────────────
+
+  String get _sortKey => switch (_ctrl.sortMode) {
+    FileSortMode.name => 'name',
+    FileSortMode.type => 'type',
+    FileSortMode.size => 'size',
+  };
+
+  void _onSort(String key) {
+    _ctrl.setSortMode(switch (key) {
+      'type' => FileSortMode.type,
+      'size' => FileSortMode.size,
+      _ => FileSortMode.name,
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final accent = colors.accent;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldPop = await _handleBack();
+        if (shouldPop && context.mounted) Navigator.of(context).pop();
+      },
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (context, _) {
+          final entries = _ctrl.entries;
+          // Gated on the mode: the toolbar that reads this is only built
+          // while selecting, and the walk is the whole folder.
+          final allPicked =
+              selectionMode && allSelected(_selectableNames(entries));
+          final canDismiss =
+              ModalRoute.of(context)?.impliesAppBarDismissal ?? false;
+          final portrait =
+              MediaQuery.orientationOf(context) == Orientation.portrait;
+          final showLeading =
+              selectionMode || _ctrl.isSearching || _ctrl.canGoUp || canDismiss;
+          return Scaffold(
+            backgroundColor: colors.background,
+            appBar: AppBar(
+              backgroundColor: accent,
+              foregroundColor: colors.onAccent,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              surfaceTintColor: Colors.transparent,
+              titleSpacing: showLeading ? 0 : NavigationToolbar.kMiddleSpacing,
+              automaticallyImplyLeading: false,
+              leading: !showLeading
+                  ? null
+                  : selectionMode
+                  ? IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: exitSelection,
+                    )
+                  : BackButton(onPressed: _handleBackButton),
+              title: selectionMode
+                  ? Text(
+                      context.l10n.selectedCount(selectedCount),
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  : _buildSearchField(colors),
+              actions: selectionMode
+                  ? [
+                      _BarButton(
+                        icon: allPicked
+                            ? Icons.deselect_rounded
+                            : Icons.select_all_rounded,
+                        label: allPicked
+                            ? context.l10n.selectNone
+                            : context.l10n.selectAll,
+                        onTap: _selectAll,
+                      ),
+                      _BarButton(
+                        icon: Icons.more_horiz_rounded,
+                        tooltip: context.l10n.fmMoreActions,
+                        // Never disabled: this whole list is built only while
+                        // selecting, and selecting means something is
+                        // selected. It read `_selected.isEmpty ? null` while
+                        // the flag beside the set could disagree with it.
+                        onTap: _showSelectionActions,
+                      ),
+                      const SizedBox(width: 8),
+                    ]
+                  : [
+                      if (_ctrl.viewMode == FileViewMode.grid)
+                        _BarButton(
+                          icon: Icons.swap_vert_rounded,
+                          tooltip: context.l10n.fmSortBy,
+                          onTap: _showSortSheet,
+                        ),
+                      _BarButton(
+                        icon: _ctrl.viewMode == FileViewMode.list
+                            ? Icons.grid_view_rounded
+                            : Icons.view_list_rounded,
+                        tooltip: _ctrl.viewMode == FileViewMode.list
+                            ? context.l10n.fmGridView
+                            : context.l10n.fmListView,
+                        onTap: _ctrl.toggleViewMode,
+                      ),
+                      _BarButton(
+                        icon: _ctrl.showHidden
+                            ? Icons.visibility_rounded
+                            : Icons.visibility_off_rounded,
+                        tooltip: _ctrl.showHidden
+                            ? context.l10n.fmHideHidden
+                            : context.l10n.fmShowHidden,
+                        active: _ctrl.showHidden,
+                        onTap: _ctrl.toggleHidden,
+                      ),
+                      if (!portrait)
+                        _BarButton(
+                          icon: Icons.refresh_rounded,
+                          tooltip: context.l10n.fmRefresh,
+                          onTap: _ctrl.loading ? null : _ctrl.refresh,
+                        ),
+                      _BarButton(label: '${entries.length}'),
+                      const SizedBox(width: 8),
+                    ],
+            ),
+            body: FileDropRegion(
+              label: context.l10n.fmDropToUpload(_ctrl.path),
+              onFiles: (paths) => unawaited(
+                guarded(
+                  '[FileManager] upload dropped',
+                  () => _uploadDropped(paths),
+                ),
+              ),
+              child: Column(
+                children: [
+                  _buildBreadcrumbs(colors),
+                  if (_clipboard != null) _buildClipboardBanner(colors),
+                  if (_ctrl.transferLabel != null) _buildTransferBar(colors),
+                  Expanded(child: _buildBody(context, entries)),
+                ],
+              ),
+            ),
+            floatingActionButton: selectionMode
+                ? null
+                : FloatingActionButton.small(
+                    backgroundColor: accent,
+                    foregroundColor: colors.onAccent,
+                    onPressed: _showFabMenu,
+                    child: const Icon(Icons.add),
+                  ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSearchField(QAppColors colors) {
+    final on = colors.onAccent;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: SizedBox(
+        height: 36,
+        child: TextField(
+          controller: _searchCtrl,
+          focusNode: _searchFocus,
+          onChanged: (v) => setState(() => _ctrl.setSearch(v)),
+          textInputAction: TextInputAction.search,
+          style: TextStyle(color: on, fontSize: 13),
+          cursorColor: on,
+          decoration: InputDecoration(
+            hintText: context.l10n.fmSearchInFolder,
+            hintStyle: TextStyle(color: on.withValues(alpha: 0.6)),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              color: on.withValues(alpha: 0.75),
+              size: 17,
+            ),
+            suffixIcon: _searchCtrl.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: context.l10n.commonClear,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: on.withValues(alpha: 0.75),
+                      size: 15,
+                    ),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() => _ctrl.setSearch(''));
+                      _searchFocus.requestFocus();
+                    },
+                  ),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.16),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 9,
+            ),
+            isDense: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(9),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(9),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.28),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(9),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.55),
+                width: 1.4,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSelectionActions() async {
+    final items = _selectedEntries;
+    if (items.isEmpty) return;
+    final actions = <ActionItem>[
+      if (items.length == 1 && _ctrl.viewMode == FileViewMode.list)
+        ActionItem(
+          icon: Icons.drive_file_rename_outline,
+          label: context.l10n.fmRename,
+          onTap: _renameSelected,
+        ),
+      ActionItem(
+        icon: Icons.download_outlined,
+        label: context.l10n.fmDownload,
+        onTap: _downloadSelected,
+      ),
+      ActionItem(
+        icon: Icons.copy_outlined,
+        label: context.l10n.fmCopy,
+        onTap: _copySelected,
+      ),
+      ActionItem(
+        icon: Icons.drive_file_move_outlined,
+        label: context.l10n.fmMove,
+        onTap: _moveSelected,
+      ),
+      if (_allFap(items))
+        ActionItem(
+          icon: Icons.image_outlined,
+          label: items.length == 1
+              ? context.l10n.fmIndexIcon
+              : context.l10n.fmIndexIcons,
+          onTap: _indexFapIconsSelected,
+        ),
+      ActionItem(
+        icon: Icons.delete_outline,
+        label: context.l10n.commonDelete,
+        destructive: true,
+        onTap: _deleteSelected,
+      ),
+    ];
+    await ActionsSheet.show(
+      context,
+      leading: FileIconBadge(entry: items.first, size: 40),
+      title: context.l10n.selectedCount(items.length),
+      subtitle: _ctrl.path,
+      actions: actions,
+    );
+  }
+
+  Future<void> _handleBackButton() async {
+    final shouldPop = await _handleBack();
+    if (!shouldPop || !mounted) return;
+    final nav = Navigator.of(context);
+    if (nav.canPop()) nav.pop();
+  }
+
+  Widget _buildBreadcrumbs(QAppColors colors) {
+    final segments = _ctrl.path.split('/').where((s) => s.isNotEmpty).toList();
+    final crumbs = <Widget>[];
+
+    Widget chip(Widget child, String targetPath, {bool isLast = false}) {
+      return InkWell(
+        onTap: isLast ? null : () => _navigateTo(targetPath),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: child,
+        ),
+      );
+    }
+
+    crumbs.add(
+      chip(
+        Icon(
+          Icons.home_filled,
+          size: 18,
+          color: segments.isEmpty ? colors.accent : colors.textSecondary,
+        ),
+        '/',
+        isLast: segments.isEmpty,
+      ),
+    );
+
+    var cumulative = '';
+    for (var i = 0; i < segments.length; i++) {
+      cumulative += '/${segments[i]}';
+      final isLast = i == segments.length - 1;
+      crumbs.add(Icon(Icons.chevron_right, size: 16, color: colors.textMuted));
+      crumbs.add(
+        chip(
+          Text(
+            segments[i],
+            style: TextStyle(
+              color: isLast ? colors.accent : colors.textSecondary,
+              fontWeight: isLast ? FontWeight.w700 : FontWeight.w500,
+              fontSize: 13.5,
+            ),
+          ),
+          cumulative,
+          isLast: isLast,
+        ),
+      );
+    }
+
+    return Container(
+      height: 40,
+      width: double.infinity,
+      color: fileBarColor(colors),
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        reverse: true,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(mainAxisSize: MainAxisSize.min, children: crumbs),
+      ),
+    );
+  }
+
+  Widget _buildTransferBar(QAppColors colors) {
+    final cancelling = _ctrl.cancelRequested;
+    return SyncProgressBar(
+      icon: _ctrl.transferIsUpload
+          ? Icons.upload_rounded
+          : Icons.download_rounded,
+      label: cancelling ? context.l10n.fmCancelling : _ctrl.transferLabel!,
+      progress: _ctrl.transferProgress,
+      color: colors.accent,
+      onCancel: cancelling ? null : _ctrl.cancelTransfer,
+    );
+  }
+
+  Widget _buildClipboardBanner(QAppColors colors) {
+    final cb = _clipboard!;
+    return Container(
+      height: 32,
+      color: colors.accent.withValues(alpha: 0.12),
+      padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
+      child: Row(
+        children: [
+          Icon(
+            cb.isCut ? Icons.content_cut : Icons.content_copy,
+            size: 14,
+            color: colors.accent,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${cb.isCut ? context.l10n.fmMoving : context.l10n.fmCopying}'
+              ' ${cb.label}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: colors.textPrimary, fontSize: 12),
+            ),
+          ),
+          TextButton(
+            onPressed: _paste,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              context.l10n.fmPasteHere,
+              style: TextStyle(
+                color: colors.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close, size: 15, color: colors.textMuted),
+            onPressed: () => setState(() => _clipboard = null),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, List<RemoteEntry> entries) {
+    final colors = context.appColors;
+    if (_ctrl.loading && entries.isEmpty) {
+      return Center(child: CircularProgressIndicator(color: colors.accent));
+    }
+    if (!_ctrl.client.isConnected) {
+      return ArchiveEmptyView(
+        icon: Icons.link_off,
+        title: context.l10n.fmNotConnected,
+        subtitle: context.l10n.fmNotConnectedHint,
+        actionLabel: context.l10n.commonConnect,
+        onAction: _connect,
+      );
+    }
+    if (_ctrl.error != null && entries.isEmpty) {
+      return ArchiveEmptyView(
+        icon: Icons.error_outline,
+        title: _ctrl.error!,
+        actionLabel: context.l10n.commonRetry,
+        onAction: _ctrl.refresh,
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        return RefreshIndicator(
+          color: colors.accent,
+          displacement: 15,
+          onRefresh: _ctrl.refresh,
+          child: entries.isEmpty
+              ? SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: SizedBox(
+                    height: constraints.maxHeight,
+                    child: _buildEmptyState(),
+                  ),
+                )
+              : _ctrl.viewMode == FileViewMode.grid
+              ? _buildGrid(entries)
+              : _buildTable(entries, constraints),
+        );
+      },
+    );
+  }
+
+  Widget _buildTable(List<RemoteEntry> entries, BoxConstraints constraints) {
+    final cols = layoutFileColumns(
+      fileColumns(),
+      constraints.maxWidth -
+          kFileTrailingWidth -
+          (selectionMode ? kFileSelectionWidth : 0),
+      entries,
+    );
+    return Column(
+      children: [
+        FileColumnHeader(
+          cols: cols,
+          sortKey: _sortKey,
+          sortAsc: _ctrl.sortAscending,
+          onSort: _onSort,
+          selectionMode: selectionMode,
+        ),
+        Expanded(
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: ClampingScrollPhysics(),
+            ),
+            padding: const EdgeInsets.only(bottom: 80),
+            itemCount: entries.length,
+            itemBuilder: (_, i) {
+              final e = entries[i];
+              return _dragSource(
+                e,
+                FileTableRow(
+                  key: ValueKey('${e.isDir}:${e.name}'),
+                  entry: e,
+                  cols: cols,
+                  actions: _actionsFor(e),
+                  selectionMode: selectionMode,
+                  selected: isSelected(e.name),
+                  progress: _ctrl.entryProgress(e.name),
+                  onCancel: _cancelFor(e),
+                  autoEdit: e.name == _pendingRenameName,
+                  onTap: () => unawaited(
+                    guarded(
+                      '[FileManager] open ${e.name}',
+                      () => _onEntryTap(e),
+                    ),
+                  ),
+                  onLongPress: () => enterSelection(e.name),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGrid(List<RemoteEntry> entries) {
+    return GridView.builder(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: ClampingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 80),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 104,
+        mainAxisExtent: 104,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+      ),
+      itemCount: entries.length,
+      itemBuilder: (_, i) {
+        final e = entries[i];
+        return _dragSource(
+          e,
+          FileGridTile(
+            key: ValueKey('${e.isDir}:${e.name}'),
+            entry: e,
+            actions: _actionsFor(e),
+            selectionMode: selectionMode,
+            selected: isSelected(e.name),
+            progress: _ctrl.entryProgress(e.name),
+            onCancel: _cancelFor(e),
+            onTap: () => unawaited(
+              guarded('[FileManager] open ${e.name}', () => _onEntryTap(e)),
+            ),
+            onLongPress: () => enterSelection(e.name),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEmptyState() {
+    final searching = _ctrl.isSearching;
+    return ArchiveEmptyView(
+      icon: searching ? Icons.search_off : Icons.folder_open,
+      title: searching ? context.l10n.fmNoMatches : context.l10n.fmEmptyFolder,
+      subtitle: searching ? null : context.l10n.fmEmptyHint,
+      actionLabel: searching
+          ? context.l10n.commonClear
+          : context.l10n.fmRefresh,
+      onAction: searching ? _stopSearch : _ctrl.refresh,
+    );
+  }
+
+  DragFile _dragFile(RemoteEntry e) {
+    final remotePath = _ctrl.childPath(e.name);
+    return DragFile(
+      id: remotePath,
+      name: e.name,
+      load: (progress) => _ctrl.exportBytes(
+        remotePath,
+        expectedSize: e.size,
+        onCancel: progress?.onCancel,
+        onProgress: progress?.updateProgress,
+      ),
+    );
+  }
+
+  /// Files drag out one at a time, or as the whole selection when the row is
+  /// part of it. Folders and rows still arriving stay put.
+  Widget _dragSource(RemoteEntry e, Widget child) {
+    if (e.isDir || e.pending) return child;
+    final selected = isSelected(e.name);
+    return FileDragSource(
+      key: ValueKey('${e.isDir}:${e.name}'),
+      file: _dragFile(e),
+      group: selected
+          ? () => [
+              for (final s in _selectedEntries)
+                if (!s.isDir) _dragFile(s),
+            ]
+          : null,
+      canStart: () => _mayDownload(selected ? _selectedEntries : [e]),
+      onDropped: selected ? exitSelection : null,
+      child: child,
+    );
+  }
+
+  VoidCallback? _cancelFor(RemoteEntry e) {
+    if (_ctrl.entryProgress(e.name) == null || _ctrl.entryCancelling(e.name)) {
+      return null;
+    }
+    return () => _ctrl.cancelEntry(e.name);
+  }
+
+  FileEntryActions _actionsFor(RemoteEntry e) {
+    final cat = e.isDir ? null : ArchiveCategory.fromExtension(e.extension);
+    return FileEntryActions(
+      onRename: (n) => _renameEntry(e, n),
+      onDelete: () => _deleteEntry(e, recursive: e.isDir),
+      onShare: e.isDir
+          ? null
+          : () async {
+              if (!_mayDownload([e])) return;
+              await shareRemoteFile(
+                context,
+                _ctrl,
+                _ctrl.childPath(e.name),
+                expectedSize: e.size,
+              );
+            },
+      onCopy: () => _copyEntry(e),
+      onCut: () => _cutEntry(e),
+      onDownload: () => _downloadEntries([e]),
+      onIndexIcon: (!e.isDir && e.extension == 'fap')
+          ? () => _indexFapIcon(e)
+          : null,
+      onEmulate: (cat != null && cat.emulatable)
+          ? () => _emulateEntry(e, cat)
+          : null,
+      // Through _openFile, so Edit shares the row tap's guard rather than
+      // keeping a second copy of the dispatch.
+      onEdit: e.isDir
+          ? null
+          : () => unawaited(
+              guarded('[FileManager] open ${e.name}', () => _openFile(e)),
+            ),
+    );
+  }
+}
+
+class _BarButton extends StatelessWidget {
+  const _BarButton({
+    this.icon,
+    this.label,
+    this.tooltip,
+    this.onTap,
+    this.active = false,
+  });
+
+  static const double size = 36;
+
+  final IconData? icon;
+  final String? label;
+  final String? tooltip;
+  final VoidCallback? onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final text = label;
+    final glyph = icon;
+    final foreground = active ? colors.accent : colors.onAccent;
+    final dimmed = onTap == null && tooltip != null;
+
+    Widget control = Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Center(
+        child: Opacity(
+          opacity: dimmed ? 0.45 : 1,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              height: size,
+              width: (glyph != null && text == null) ? size : null,
+              alignment: Alignment.center,
+              padding: EdgeInsets.symmetric(
+                horizontal: (glyph != null && text == null) ? 0 : 10,
+              ),
+              decoration: BoxDecoration(
+                color: active
+                    ? Colors.white.withValues(alpha: 0.88)
+                    : Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(9),
+                border: active
+                    ? null
+                    : Border.all(color: Colors.white.withValues(alpha: 0.26)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (glyph != null) Icon(glyph, size: 17, color: foreground),
+                  if (glyph != null && text != null) const SizedBox(width: 5),
+                  if (text != null)
+                    Text(
+                      text,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final message = tooltip;
+    if (message != null) {
+      control = Tooltip(message: message, child: control);
+    }
+    return control;
+  }
+}

@@ -1,0 +1,122 @@
+import '../../../services/localization/l10n.dart';
+
+import 'dart:io' as io;
+
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+
+import '../../../components/config.dart';
+import '../../../services/http/app_http.dart';
+import 'directory.dart';
+
+abstract class FirmwareSource {
+  Future<String> resolveArchive(
+    String tmpDir,
+    void Function(double progress) onProgress,
+  );
+
+  bool get isRemote;
+}
+
+class RemoteFirmwareSource implements FirmwareSource {
+  RemoteFirmwareSource({
+    required this.entry,
+    required this.channelId,
+    this.target = 'f7',
+    this.variant = UnleashedVariant.base,
+  });
+
+  final FirmwareEntry entry;
+  final String channelId;
+  final String target;
+  final UnleashedVariant variant;
+
+  @override
+  bool get isRemote => true;
+
+  @override
+  Future<String> resolveArchive(
+    String tmpDir,
+    void Function(double progress) onProgress,
+  ) async {
+    final parser = parserForEntry(entry);
+    await parser.get();
+
+    final version = parser.getLatestVersionById(channelId);
+    if (version == null) {
+      throw FirmwareSourceException(l10n.firmwareErrorNoVersion);
+    }
+
+    final FirmwareFile? tgzFile = parser is UnleashedParser
+        ? parser.getUpdatePackage(channelId, target: target, variant: variant)
+        : version.updatePackageFor(target);
+    if (tgzFile == null) {
+      throw FirmwareSourceException(l10n.firmwareErrorNoPackage(target));
+    }
+
+    final tgzPath = '$tmpDir/update.tgz';
+    await _download(tgzFile.url, tgzPath, onProgress);
+    await _verifySha256(tgzPath, tgzFile.sha256);
+    return tgzPath;
+  }
+
+  // This archive gets flashed to the device; a truncated or tampered download
+  // must never reach it. `null` is the one skip, and it means the build
+  // publishes no checksum - a variant URL. Anything else is matched, including
+  // a blank, which the feed reader does not let through and which would be a
+  // bug rather than a permission to skip.
+  static Future<void> _verifySha256(String path, String? expected) async {
+    if (expected == null) return;
+    final want = expected.trim().toLowerCase();
+    final got = await compute(_fileSha256, path);
+    if (got != want) {
+      throw FirmwareSourceException(l10n.firmwareErrorChecksum);
+    }
+  }
+
+  static String _fileSha256(String path) =>
+      sha256.convert(io.File(path).readAsBytesSync()).toString();
+
+  static Future<void> _download(
+    String url,
+    String savePath,
+    void Function(double progress) onProgress,
+  ) async {
+    await AppHttp.downloadToFile(
+      Uri.parse(url),
+      savePath,
+      onProgress: (received, total) {
+        if (total != null && total > 0) onProgress(received / total);
+      },
+    );
+    onProgress(1.0);
+  }
+}
+
+class LocalFirmwareSource implements FirmwareSource {
+  LocalFirmwareSource(this.path);
+
+  final String path;
+
+  @override
+  bool get isRemote => false;
+
+  @override
+  Future<String> resolveArchive(
+    String tmpDir,
+    void Function(double progress) onProgress,
+  ) async {
+    if (!io.File(path).existsSync()) {
+      throw FirmwareSourceException(l10n.firmwareErrorFileNotFound(path));
+    }
+    return path;
+  }
+}
+
+class FirmwareSourceException implements Exception {
+  const FirmwareSourceException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}

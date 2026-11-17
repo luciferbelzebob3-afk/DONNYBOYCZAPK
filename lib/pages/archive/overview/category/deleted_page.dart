@@ -1,0 +1,349 @@
+import '../../../../services/archive/sort_settings.dart';
+import '../../../../services/guarded.dart';
+import '../../../../services/localization/l10n.dart';
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../../../theme/theme.dart';
+import '../../../../components/dialogs/connection.dart';
+import '../controller.dart';
+import '../../../../components/archive/models/key.dart';
+import '../../../../components/selection.dart';
+import '../../widgets/actions_sheet.dart';
+import '../../../../components/filelist/empty_view.dart';
+import '../widgets/key_actions_sheet.dart';
+import '../../../../components/filelist/columns.dart';
+import 'sort.dart';
+import '../../../../components/filelist/key_table.dart';
+import '../../../../components/filelist/list_scaffold.dart';
+import '../../../../components/filelist/table.dart';
+import '../../../../components/filelist/toolbar.dart';
+import '../failure_toast.dart';
+
+/// Lists keys deleted remotely but still cached on this device, using the same
+/// table design as the per-category pages. Unlike those, every category shares a
+/// single table: each row carries its own category icon, and the columns are
+/// limited to the fields common to all of them (name/folder, protocol, size,
+/// modified).
+class DeletedPage extends StatefulWidget {
+  const DeletedPage({
+    super.key,
+    required this.controller,
+    required this.sortSettings,
+  });
+
+  final ArchiveController controller;
+
+  /// Shared with every other archive table and owned by `AppShell`, so a sort
+  /// picked here is the one they all open in - and the rail's other mounted
+  /// tables follow it without being rebuilt by hand.
+  final ArchiveSortSettings sortSettings;
+
+  @override
+  State<DeletedPage> createState() => _DeletedPageState();
+}
+
+class _DeletedPageState extends State<DeletedPage>
+    with ListSelection<DeletedPage> {
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  String _query = '';
+  String? _filterVal;
+
+  ArchiveController get _ctrl => widget.controller;
+
+  /// Rebuilds on either the archive's own changes or a sort picked on another
+  /// mounted table. Built once rather than per build, so the `AnimatedBuilder`
+  /// is not resubscribing to a fresh `Listenable` every frame.
+  late final Listenable _repaint = Listenable.merge([
+    _ctrl,
+    widget.sortSettings,
+  ]);
+
+  List<SortOption> get _sortOpts => sortOptionsFor(deletedColumns());
+
+  /// The stored sort, held to the keys this table's columns offer.
+  ({String key, bool asc}) get _sort =>
+      widget.sortSettings.resolve(_sortOpts.map((o) => o.key));
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(guarded('[Archive] load deleted meta', _ctrl.loadMetaForDeleted));
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Distinct protocol tokens across all deleted keys, feeding the filter menu.
+  /// A key's protocol may itself be a comma-joined list (e.g. infrared remotes),
+  /// so it is split into individual tokens.
+  List<String> _filterOptions(List<ArchiveKey> keys) {
+    final opts = <String>{};
+    for (final k in keys) {
+      opts.addAll(_protocolTokens(k));
+    }
+    return opts.toList()..sort();
+  }
+
+  List<String> _protocolTokens(ArchiveKey k) {
+    final raw = k.protocol;
+    if (raw == null || raw.isEmpty) return const [];
+    return [
+      for (final part in raw.split(','))
+        if (part.trim().isNotEmpty) part.trim(),
+    ];
+  }
+
+  List<ArchiveKey> _visible(List<ArchiveKey> keys) {
+    var out = keys;
+    if (_filterVal != null) {
+      out = out.where((k) => _protocolTokens(k).contains(_filterVal)).toList();
+    }
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      out = out.where((k) {
+        if (k.name.toLowerCase().contains(q)) return true;
+        if (k.subFolder.toLowerCase().contains(q)) return true;
+        if (k.category.title.toLowerCase().contains(q)) return true;
+        if (k.protocol?.toLowerCase().contains(q) ?? false) return true;
+        if (k.meta?.values.any((v) => v.toLowerCase().contains(q)) ?? false) {
+          return true;
+        }
+        return false;
+      }).toList();
+    }
+    final sort = _sort;
+    return sortArchiveKeys(out, sort.key, sort.asc);
+  }
+
+  List<ArchiveKey> get _selectedKeys =>
+      _ctrl.deletedKeys().where((k) => isSelected(k.id)).toList();
+
+  void _onSort(String key) {
+    unawaited(
+      guarded(
+        '[ArchiveSort] storing the picked sort',
+        () =>
+            widget.sortSettings.pick(key, offered: _sortOpts.map((o) => o.key)),
+      ),
+    );
+  }
+
+  Future<void> _bulkRestore() async {
+    await _ctrl.restoreKeys(_selectedKeys);
+    if (mounted) {
+      reportArchiveFailure(
+        context,
+        _ctrl.lastFailure,
+        context.l10n.archiveRestoreFailed,
+      );
+    }
+    exitSelection();
+  }
+
+  Future<void> _showBulkActions(BuildContext context) async {
+    final keys = _selectedKeys;
+    if (keys.isEmpty) return;
+    final colors = context.appColors;
+
+    final actions = <ActionItem>[
+      if (_ctrl.isConnected)
+        ActionItem(
+          icon: Icons.restore,
+          label: context.l10n.archiveRestore,
+          onTap: _bulkRestore,
+        ),
+      ...KeyActionsSheet.deleteActions(
+        context,
+        _ctrl,
+        keys,
+        onDone: exitSelection,
+      ),
+    ];
+
+    await ActionsSheet.show(
+      context,
+      leading: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: colors.accent.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.delete_outline, color: colors.accent, size: 22),
+      ),
+      title: context.l10n.archiveFilesSelected(keys.length),
+      subtitle: context.l10n.archiveDeleted,
+      actions: actions,
+    );
+  }
+
+  bool get _hasFilter => _filterVal != null || _query.isNotEmpty;
+
+  IconData _emptyIcon() {
+    if (_hasFilter) return Icons.search_off;
+    if (!_ctrl.isConnected) return Icons.link_off;
+    return Icons.delete_outline;
+  }
+
+  /// One row. Built against the page's `context`, never a row's: the actions
+  /// sheet keeps the context it is given across its awaits and tests `mounted`
+  /// on it, and a restore that half-fails takes the key off this page - so a
+  /// sheet opened with the row's context would report nothing. #110.
+  Widget _keyRow(ArchiveKey key, List<SizedColumn> cols, QAppColors colors) {
+    final id = key.id;
+    return ArchiveTableRow(
+      key: ValueKey(id),
+      flipperKey: key,
+      cols: cols,
+      colors: colors,
+      cat: key.category,
+      showCategoryIcon: true,
+      progress: _ctrl.progressForKey(key),
+      selectionMode: selectionMode,
+      selected: isSelected(id),
+      onTap: () => selectionMode
+          ? toggleSelect(id)
+          : KeyActionsSheet.show(context, _ctrl, key),
+      onLongPress: () => selectionMode ? toggleSelect(id) : enterSelection(id),
+    );
+  }
+
+  String _emptyActionLabel() {
+    if (_hasFilter) return context.l10n.commonClear;
+    if (!_ctrl.isConnected) return context.l10n.commonConnect;
+    return context.l10n.commonSync;
+  }
+
+  void _onEmptyAction() {
+    if (_hasFilter) {
+      _clearFilters();
+      return;
+    }
+    if (!_ctrl.isConnected) {
+      unawaited(
+        guarded(
+          '[Archive] open the picker',
+          () => promptConnectDevice(context),
+        ),
+      );
+      return;
+    }
+    unawaited(guarded('[Archive] refresh deleted', _ctrl.refresh));
+  }
+
+  void _clearFilters() {
+    _searchCtrl.clear();
+    setState(() {
+      _query = '';
+      _filterVal = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final headerColor = colors.adaptCategoryHeader(colors.accent);
+
+    return AnimatedBuilder(
+      animation: _repaint,
+      builder: (context, _) {
+        final all = _ctrl.deletedKeys();
+        final filterOpts = _filterOptions(all);
+        if (_filterVal != null && !filterOpts.contains(_filterVal)) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => setState(() => _filterVal = null),
+          );
+        }
+        final filtered = _visible(all);
+        // One record for the toolbar and the table both: two would be two
+        // chances to disagree about what a second tap on a column means. The
+        // getter behind it resolves the sort against this page's own columns,
+        // which allocates both lists, so it is read once here.
+        final resolved = _sort;
+        final sort = (
+          key: resolved.key,
+          asc: resolved.asc,
+          opts: _sortOpts,
+          onSort: _onSort,
+        );
+
+        return ArchiveListScaffold(
+          headerColor: headerColor,
+          title: const _DeletedAppBarTitle(),
+          actions: [
+            CategoryCountBadge(filtered: filtered.length, total: all.length),
+          ],
+          selection: selectionControl(
+            filtered.map((k) => k.id),
+            onActions: () => _showBulkActions(context),
+          ),
+          toolbar: CategoryToolbar(
+            searchCtrl: _searchCtrl,
+            query: _query,
+            filterVal: _filterVal,
+            filterOpts: filterOpts,
+            sort: sort,
+            starredOnly: false,
+            catColor: headerColor,
+            colors: colors,
+            showStar: false,
+            onQueryChanged: (v) => setState(() => _query = v),
+            onFilterChanged: (v) => setState(() => _filterVal = v),
+            onStarredToggle: () {},
+          ),
+          body: ArchiveKeyTable(
+            columns: (width) =>
+                layoutColumns(deletedColumns(), width, filtered),
+            sort: sort,
+            selectionMode: selectionMode,
+            accent: headerColor,
+            onRefresh: _ctrl.refresh,
+            empty: () => ArchiveEmptyView(
+              icon: _emptyIcon(),
+              title: _query.isNotEmpty
+                  ? context.l10n.archiveEmptyQuery(_query)
+                  : _filterVal != null
+                  ? context.l10n.archiveNoFilesFilter
+                  : context.l10n.archiveNothingHere,
+              subtitle: _hasFilter ? null : context.l10n.archiveDeletedHint,
+              actionLabel: _emptyActionLabel(),
+              onAction: _onEmptyAction,
+            ),
+            itemCount: filtered.length,
+            itemBuilder: (i, cols) => _keyRow(filtered[i], cols, colors),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _DeletedAppBarTitle extends StatelessWidget {
+  const _DeletedAppBarTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.delete_outline, color: Colors.white, size: 18),
+        const SizedBox(width: 8),
+        Text(
+          context.l10n.archiveDeleted,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}

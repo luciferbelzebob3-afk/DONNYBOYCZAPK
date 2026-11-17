@@ -1,0 +1,422 @@
+import 'dart:io' as io;
+
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
+import 'package:path_provider/path_provider.dart';
+
+import '../logging.dart';
+import '../../components/path.dart';
+import 'permissions.dart';
+
+const String kAppDocumentsFolderName = 'qUnleashed';
+const String kDevicesFolderName = 'Devices';
+const String kAppsCatalogFileName = '.catalog.json';
+const String kScreenshotsFolderName = 'Screenshots';
+const String kRecordingsFolderName = 'Recordings';
+const String kAnimationsFolderName = 'Animations';
+const String kProjectsFolderName = 'Projects';
+const String kResourcesFolderName = '.resources';
+const String kIrLibFolderName = 'irlib';
+const String kAtpFolderName = 'all-the-plugins';
+const String kAtpIndexFileName = 'index.txt';
+
+/// Name of the last connected device, written by the archive to
+/// `Devices/.last_device`. Lets offline screens resolve their local folder.
+Future<String?> lastDeviceName() async {
+  try {
+    final root = await appDevicesDirectory();
+    final file = io.File(pathJoin([root.path, '.last_device']));
+    if (!await file.exists()) return null;
+    final raw = (await file.readAsString()).trim();
+    return raw.isEmpty ? null : raw;
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<io.File> installedCatalogFile(String deviceName) async {
+  final root = await appDevicesDirectory();
+  return io.File(
+    pathJoin([
+      root.path,
+      sanitizePathSegment(deviceName),
+      'apps',
+      kAppsCatalogFileName,
+    ]),
+  );
+}
+
+/// Local mirror of the device's `/ext/apps`, where the manager backs up every
+/// `.fap`. Lives at `Devices/<name>/apps`.
+Future<io.Directory> appsBackupDirectory(String deviceName) async {
+  final root = await appDevicesDirectory();
+  final dir = io.Directory(
+    pathJoin([root.path, sanitizePathSegment(deviceName), 'apps']),
+  );
+  await dir.create(recursive: true);
+  return dir;
+}
+
+String? normalizeFlipperDeviceName(String? raw) {
+  if (raw == null) return null;
+  var name = raw.trim();
+  final prefix = RegExp(r'^flipper[\s_-]+', caseSensitive: false);
+  name = name.replaceFirst(prefix, '').trim();
+  return name.isEmpty ? null : name;
+}
+
+/// Stands in for the user's Documents folder while a test runs.
+///
+/// Every path in this file hangs off [userDocumentsDirectory]. On macOS and
+/// Linux that reads `HOME` directly rather than going through `path_provider`
+/// - so a test that stubs the platform interface still writes into the real
+/// one. Windows asks the platform interface first and falls back to the
+/// environment, so a stub does reach it there; either way
+/// [debugUseDocumentsRoot] is what a test should set, and nothing else.
+io.Directory? _debugDocumentsRoot;
+
+/// Points every app path at [dir], or back at the user's own folder for null.
+///
+/// For tests. Without it a case that touches storage writes into the
+/// developer's actual `Documents/qUnleashed`, alongside their devices, and
+/// leaves it there.
+@visibleForTesting
+void debugUseDocumentsRoot(io.Directory? dir) => _debugDocumentsRoot = dir;
+
+Future<io.Directory> userDocumentsDirectory() async {
+  final override = _debugDocumentsRoot;
+  if (override != null) return override;
+
+  final sep = io.Platform.pathSeparator;
+
+  if (io.Platform.isWindows) {
+    final known = await _windowsDocumentsDirectory();
+    if (known != null) return known;
+    final userProfile = io.Platform.environment['USERPROFILE'];
+    if (userProfile != null && userProfile.isNotEmpty) {
+      return io.Directory('$userProfile${sep}Documents');
+    }
+  }
+
+  if (io.Platform.isMacOS) {
+    final home = _macosRealHomeDirectory();
+    if (home != null && home.isNotEmpty) {
+      return io.Directory('$home${sep}Documents');
+    }
+  }
+
+  if (io.Platform.isLinux) {
+    final home = io.Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      return io.Directory('$home${sep}Documents');
+    }
+  }
+
+  if (io.Platform.isAndroid) {
+    final documents = await _androidPublicDocumentsDirectory();
+    if (documents != null) return documents;
+  }
+
+  // iOS: getApplicationDocumentsDirectory() returns the app sandbox
+  // Documents folder, which is the correct (and only writable) location.
+  return getApplicationDocumentsDirectory();
+}
+
+/// Where Windows says Documents is, or null if it will not say.
+///
+/// `%USERPROFILE%\\Documents` is a guess, and on a lot of machines it is the
+/// wrong one: OneDrive's Known Folder Move redirects Documents into
+/// `%USERPROFILE%\\OneDrive\\Documents` and the old path stops existing, and the
+/// folder can be relocated by hand to another drive entirely. The app then
+/// cannot create `Documents\\qUnleashed`, and because every path in this file
+/// hangs off this one, nothing that keeps a file works -
+/// `PathNotFoundException: Creation failed ... errno = 2`, which is
+/// QUNLEASHED-5, still arriving from Windows 10 builds.
+///
+/// `getApplicationDocumentsPath` on Windows is
+/// `getPath(WindowsKnownFolder.Documents)` - `SHGetKnownFolderPath` for
+/// `FOLDERID_Documents` - which is the only answer that follows a redirect.
+/// Checked in `path_provider_windows` rather than assumed: on macOS the same
+/// call would return the *sandbox* container's Documents, which is why that
+/// platform still reads `HOME` below and why this is Windows-only.
+///
+/// Null rather than a throw for every way it can fail, because the caller has
+/// a usable guess and a startup path that must not break on a platform
+/// channel: `path_provider_windows` is pure Dart over FFI, but the interface
+/// can still be stubbed, missing or throw.
+Future<io.Directory?> _windowsDocumentsDirectory() async {
+  try {
+    final documents = await getApplicationDocumentsDirectory();
+    if (documents.path.isNotEmpty) return documents;
+  } catch (e) {
+    // `caught`: the fallback below is a reasonable answer and the user sees
+    // nothing, but a machine where Windows will not name its own known folder
+    // is worth knowing about if the fallback then fails too.
+    LogService.caught('[Paths] Windows would not name Documents: $e');
+  }
+  return null;
+}
+
+/// [_windowsDocumentsDirectory] under test.
+///
+/// Its call site is Windows-only and CI runs the suite on ubuntu, so the two
+/// branches are reached here rather than through [userDocumentsDirectory].
+/// `Scrub.debugHomePatternCount` is the same arrangement for the same reason.
+@visibleForTesting
+Future<io.Directory?> debugWindowsDocumentsDirectory() =>
+    _windowsDocumentsDirectory();
+
+/// Resolves the shared, user-visible Documents directory on Android
+/// (e.g. /storage/emulated/0/Documents) instead of the app-private
+/// container that [getApplicationDocumentsDirectory] returns there.
+Future<io.Directory?> _androidPublicDocumentsDirectory() async {
+  final sep = io.Platform.pathSeparator;
+
+  // getExternalStorageDirectory() -> /storage/emulated/0/Android/data/<pkg>/files
+  // The external storage root is everything before the "/Android/" segment.
+  final external = await getExternalStorageDirectory();
+  if (external != null) {
+    final marker = '${sep}Android$sep';
+    final index = external.path.indexOf(marker);
+    if (index > 0) {
+      final root = external.path.substring(0, index);
+      return io.Directory('$root${sep}Documents');
+    }
+  }
+
+  // Fallback to the conventional primary external storage path.
+  return io.Directory('${sep}storage${sep}emulated${sep}0${sep}Documents');
+}
+
+/// The app's folder under the user's Documents directory, created if missing.
+///
+/// Still returns the directory when the storage permission was refused, and
+/// still throws if creating it then fails. That is deliberate and it is the
+/// shape every caller already handles: the folder is the right answer to
+/// "where does this go", the OS is what refuses, and the refusal arrives at
+/// the operation the user actually started rather than here.
+///
+/// What changed in #351 is that the refusal is now *also* written down.
+/// `ensureAndroidStoragePermission` reports it to `PermissionCenter`, so the
+/// surfaces that hang off this path can say why they are empty — the IR
+/// library dialog, Archive and Settings → Storage. Before, this bare `await`
+/// was the single place a denied `MANAGE_EXTERNAL_STORAGE` went to die, for
+/// every storage path in the app.
+///
+/// The bool is deliberately not branched on here. Refusing to return a path
+/// would turn one denial into a throw out of every caller, including the
+/// startup recovery pass that #350 had to stop reporting as a failed ambient
+/// service; and `getApplicationDocumentsDirectory()` is not a fallback the
+/// product wants, because users back up their own key dumps with a file
+/// manager and a sandbox folder is invisible to one.
+Future<io.Directory> appDocumentsDirectory() async {
+  // Called, not read. The answer reaches `PermissionCenter` through the sink
+  // the composition root installed; the bool is dropped here deliberately,
+  // and the paragraph above is why.
+  await ensureAndroidStoragePermission();
+  final base = await userDocumentsDirectory();
+  final dir = io.Directory(pathJoin([base.path, kAppDocumentsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> appDevicesDirectory() async {
+  final root = await appDocumentsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kDevicesFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> appResourcesDirectory() async {
+  final root = await appDocumentsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kResourcesFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> irLibRepositoryDirectory() async {
+  final root = await appResourcesDirectory();
+  return io.Directory(pathJoin([root.path, kIrLibFolderName]));
+}
+
+Future<io.Directory> atpRepositoryDirectory() async {
+  final root = await appResourcesDirectory();
+  final dir = io.Directory(pathJoin([root.path, kAtpFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.File> atpIndexFile() async {
+  final root = await atpRepositoryDirectory();
+  return io.File(pathJoin([root.path, kAtpIndexFileName]));
+}
+
+Future<io.Directory> shareCacheDirectory() async {
+  final base = await getTemporaryDirectory();
+  final dir = io.Directory(pathJoin([base.path, 'qunleashed_share']));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+/// A fresh folder for files another application dropped onto this one, one
+/// per drop so two drops cannot overwrite each other's files.
+Future<io.Directory> droppedFilesDirectory() => _transferScratch('dropped');
+
+/// A fresh folder for a file dragged out of the app to be copied into before
+/// another application is handed its path.
+Future<io.Directory> draggedFilesDirectory() => _transferScratch('dragged');
+
+Future<io.Directory> _transferScratch(String kind) async {
+  final base = await getTemporaryDirectory();
+  final dir = io.Directory(
+    pathJoin([
+      base.path,
+      'qunleashed_$kind',
+      '${DateTime.now().microsecondsSinceEpoch}',
+    ]),
+  );
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> appScreenshotsDirectory() async {
+  final root = await appDocumentsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kScreenshotsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> appRecordingsDirectory() async {
+  final root = await appDocumentsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kRecordingsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> appAnimationsDirectory() async {
+  final root = await appDocumentsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kAnimationsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+/// Saved Pixel Draw projects (each a Dolphin animation folder: meta.txt +
+/// frame_*.bm). Lives under `Animations/Projects`.
+Future<io.Directory> appProjectsDirectory() async {
+  final root = await appAnimationsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kProjectsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+const String kDolphinAnimationsFolderName = 'Dolphin';
+
+/// Local mirror of the Flipper's `/ext/dolphin` directory, where each
+/// sub-folder is one animation (meta.txt + frame_*.bm) and a manifest.txt
+/// describes the set. Lives under `Animations/Dolphin`.
+Future<io.Directory> appDolphinAnimationsDirectory() async {
+  final root = await appAnimationsDirectory();
+  final dir = io.Directory(pathJoin([root.path, kDolphinAnimationsFolderName]));
+  await dir.create(recursive: true);
+  return dir;
+}
+
+Future<io.Directory> legacyApplicationDocumentsDirectory(
+  Iterable<String> parts,
+) async {
+  final base = await getApplicationDocumentsDirectory();
+  return io.Directory(pathJoin([base.path, ...parts]));
+}
+
+/// Adds up the files under [dir], skipping what it cannot measure.
+///
+/// The figure reaches the user as a size on the storage screen, so a partial
+/// one is a wrong number presented as a fact. Both ways it can go short say
+/// so: files that would not answer their length, and a walk that stopped.
+///
+/// Counted and reported once rather than per file - a folder the OS has
+/// locked fails every entry in it, and a line each is a log nobody reads.
+Future<int> directorySize(io.Directory dir) async {
+  if (!await dir.exists()) return 0;
+  var total = 0;
+  var skipped = 0;
+  try {
+    await for (final entity in dir.list(recursive: true, followLinks: false)) {
+      if (entity is! io.File) continue;
+      try {
+        total += await entity.length();
+      } catch (_) {
+        skipped++;
+      }
+    }
+  } catch (e) {
+    LogService.warn('[Storage] stopped measuring "${dir.path}" early: $e');
+  }
+  if (skipped > 0) {
+    LogService.warn(
+      '[Storage] could not measure $skipped file(s) under "${dir.path}"',
+    );
+  }
+  return total;
+}
+
+/// Empties [dir], leaving behind what will not delete.
+///
+/// A file held open by another process, or one the OS refuses, used to leave
+/// the screen reporting a cleared cache over a folder that still has things
+/// in it. Reported once with a count, for the same reason as the walk above.
+Future<void> clearDirectory(io.Directory dir) async {
+  if (!await dir.exists()) return;
+  var left = 0;
+  await for (final entity in dir.list(followLinks: false)) {
+    try {
+      await entity.delete(recursive: true);
+    } catch (_) {
+      left++;
+    }
+  }
+  if (left > 0) {
+    LogService.warn(
+      '[Storage] could not remove $left entr(ies) from "${dir.path}"',
+    );
+  }
+}
+
+const String kIrLibSettingsFileName = '.irlib.settings.json';
+
+Future<io.File> irLibSettingsFile() async {
+  final root = await appResourcesDirectory();
+  return io.File(pathJoin([root.path, kIrLibSettingsFileName]));
+}
+
+/// The user's own home folder on a desktop, or null.
+///
+/// On macOS the real one, not the sandbox container's, for the reason
+/// [userDocumentsDirectory] gives. Null on Android and iOS, which have no
+/// home folder a user would recognise.
+String? desktopHomeDirectory() {
+  if (io.Platform.isMacOS) return _macosRealHomeDirectory();
+  final String? home;
+  if (io.Platform.isWindows) {
+    home = io.Platform.environment['USERPROFILE'];
+  } else if (io.Platform.isLinux) {
+    home = io.Platform.environment['HOME'];
+  } else {
+    return null;
+  }
+  return home == null || home.isEmpty ? null : home;
+}
+
+String? _macosRealHomeDirectory() {
+  final home = io.Platform.environment['HOME'];
+  if (home == null || home.isEmpty) return null;
+  final sandboxMarker =
+      '${io.Platform.pathSeparator}Library'
+      '${io.Platform.pathSeparator}Containers'
+      '${io.Platform.pathSeparator}';
+  final markerIndex = home.indexOf(sandboxMarker);
+  if (markerIndex > 0) {
+    return home.substring(0, markerIndex);
+  }
+  return home;
+}

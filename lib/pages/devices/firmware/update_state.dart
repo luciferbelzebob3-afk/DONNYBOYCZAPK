@@ -1,0 +1,63 @@
+import 'package:flipperlib/flipperlib.dart' show RecoveryStep;
+
+sealed class UpdateState {
+  const UpdateState();
+}
+
+class UpdateIdle extends UpdateState {
+  const UpdateIdle();
+}
+
+class UpdateFetching extends UpdateState {
+  const UpdateFetching();
+}
+
+class UpdateDownloading extends UpdateState {
+  const UpdateDownloading(this.progress);
+  final double progress;
+}
+
+class UpdateVerifying extends UpdateState {
+  const UpdateVerifying({this.fileIndex = 0, this.fileCount = 0});
+  final int fileIndex;
+  final int fileCount;
+}
+
+class UpdateUploading extends UpdateState {
+  const UpdateUploading(
+    this.progress, {
+    this.fileIndex = 0,
+    this.fileCount = 0,
+  });
+  final double progress;
+  final int fileIndex;
+  final int fileCount;
+}
+
+class UpdateStarting extends UpdateState {
+  const UpdateStarting();
+}
+
+class UpdateInstalling extends UpdateState {
+  const UpdateInstalling();
+}
+
+class UpdateRecovering extends UpdateState {
+  const UpdateRecovering(this.step, this.progress);
+
+  final RecoveryStep step;
+  final double progress;
+}
+
+class UpdateWaitingForReconnect extends UpdateState {
+  const UpdateWaitingForReconnect();
+}
+
+class UpdateDone extends UpdateState {
+  const UpdateDone();
+}
+
+class UpdateError extends UpdateState {
+  const UpdateError(this.message);
+  final String message;
+}

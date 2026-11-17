@@ -1,0 +1,315 @@
+import '../../../../services/localization/l10n.dart';
+import '../../../../services/logging.dart';
+
+import 'dart:async';
+
+import 'package:flipperlib/flipperlib.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+import '../../../../theme/theme.dart';
+
+import 'package:qunleashed/components/appbar.dart';
+import 'package:qunleashed/components/icon.dart';
+import 'package:qunleashed/theme/colors/category.dart';
+
+import '../../../../components/notification.dart';
+import '../../../../components/progress_button.dart';
+
+import 'package:qunleashed/services/progress_throttle.dart';
+
+typedef IrFileSendHandler = Future<bool> Function({
+  required List<int> bytes,
+  required void Function(double progress) onProgress,
+});
+
+typedef IrFileAfterSend = Future<void> Function(List<int> bytes);
+
+const _infraredAsset = 'assets/ic/fileformat/ir.svg';
+
+class IrFileViewer extends StatefulWidget {
+  const IrFileViewer({
+    super.key,
+    required this.client,
+    required this.fileName,
+    required this.subtitle,
+    required this.loading,
+    required this.error,
+    required this.text,
+    required this.bytes,
+    required this.onSend,
+    this.onAfterSend,
+    this.sendFailureReason,
+  });
+
+  /// The device whose link this watches while the file is on screen.
+  ///
+  /// Required rather than defaulted: both builders already hold one - the
+  /// library page through its controller, the content page directly - so a
+  /// default would only make this untestable. ADR 0002.
+  ///
+  /// The only source of the link state. There was an `isConnected` beside it,
+  /// passed by both builders, and both read it off *this* client - the
+  /// library page as `controller.isConnected`, which is
+  /// `_client.isConnected`, and the content page as `_client.isConnected`
+  /// directly. So the viewer was computing `x && x`, and the parameter's only
+  /// effect was to make a reader think the two could disagree. #409 was filed
+  /// as a live bug on the strength of that, and the behaviour it describes
+  /// has been correct since #153.
+  final FlipperClient client;
+
+  final String fileName;
+  final String subtitle;
+  final bool loading;
+  final String? error;
+  final String text;
+  final List<int>? bytes;
+  final IrFileSendHandler onSend;
+  final IrFileAfterSend? onAfterSend;
+
+  /// Why the last send did not go, asked for only when one did not.
+  ///
+  /// A callback rather than a value because the viewer is built before the
+  /// send happens, and a parameter would carry the reason from the send
+  /// before it. Null where the builder has nobody to ask - the content page
+  /// sends through the client directly and keeps no such record.
+  final String? Function()? sendFailureReason;
+
+  @override
+  State<IrFileViewer> createState() => _IrFileViewerState();
+}
+
+class _IrFileViewerState extends State<IrFileViewer> {
+  bool _sending = false;
+  bool _connected = false;
+  double _sendProgress = 0;
+  final ScrollController _viewScroll = ScrollController();
+  StreamSubscription<FlipperConnectionState>? _connectionSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _connected = widget.client.isConnected;
+    _connectionSub = widget.client.connectionStream.listen(_onConnectionState);
+  }
+
+  @override
+  void didUpdateWidget(covariant IrFileViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The client can change under this now that it is passed in, and the
+    // subscription belongs to the one it was opened on - a page that swapped
+    // devices would otherwise keep reading the link that left.
+    if (oldWidget.client != widget.client) {
+      _connectionSub?.cancel();
+      _connectionSub = widget.client.connectionStream.listen(
+        _onConnectionState,
+      );
+    }
+    if (oldWidget.client != widget.client) {
+      _connected = widget.client.isConnected;
+    }
+  }
+
+  @override
+  void dispose() {
+    _connectionSub?.cancel();
+    _viewScroll.dispose();
+    super.dispose();
+  }
+
+  void _onConnectionState(FlipperConnectionState state) {
+    if (!mounted) return;
+    setState(() {
+      _connected = state.connected;
+      if (!state.connected) {
+        _sending = false;
+        _sendProgress = 0;
+      }
+    });
+  }
+
+  Future<void> _send() async {
+    final bytes = widget.bytes;
+    if (bytes == null) return;
+    if (!_connected) {
+      context.showNotification(
+        context.l10n.irConnectFirst,
+        type: QNotificationType.warning,
+      );
+      return;
+    }
+    setState(() {
+      _sending = true;
+      _sendProgress = 0;
+    });
+    final throttle = ProgressThrottle();
+    final ok = await widget.onSend(
+      bytes: bytes,
+      onProgress: (p) {
+        if (!mounted) return;
+        if (throttle.shouldEmit(p)) setState(() => _sendProgress = p);
+      },
+    );
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (ok && widget.onAfterSend != null) {
+      try {
+        await widget.onAfterSend!(bytes);
+      } catch (e) {
+        // Both callers swallow their own failures today, so this cannot fire
+        // - but whether the send result is reported at all should not rest on
+        // that staying true.
+        LogService.warn('[IrFileViewer] after-send hook threw: $e');
+      }
+    }
+    if (!mounted) return;
+    // The failed half named no cause, and the disconnect that usually
+    // causes it arrives as the sentence sendIrFile raises. #114.
+    final reason = ok ? null : widget.sendFailureReason?.call();
+    context.showNotification(
+      ok
+          ? context.l10n.irSentToDevice
+          : reason == null
+          ? context.l10n.irSendFailed
+          : context.l10n.fmFailedBecause(context.l10n.irSendFailed, reason),
+      type: ok ? QNotificationType.good : QNotificationType.error,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Scaffold(
+      backgroundColor: colors.background,
+      appBar: QPageAppBar(
+        client: widget.client,
+        title: widget.fileName,
+        backgroundColor: colors.accent,
+        foregroundColor: colors.onAccent,
+      ),
+      body: SafeArea(top: false, child: _buildBody(colors)),
+    );
+  }
+
+  Widget _buildBody(QAppColors colors) {
+    if (widget.loading) {
+      return Center(child: CircularProgressIndicator(color: colors.accent));
+    }
+    if (widget.error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            widget.error!,
+            style: TextStyle(color: colors.danger),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    final infraredColor = ArchiveCategoryColor.infrared.color;
+    final badge = QIconBadgeStyle.forColors(colors, infraredColor);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: badge.background,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SvgPicture.asset(
+                  _infraredAsset,
+                  width: 22,
+                  height: 22,
+                  colorFilter: ColorFilter.mode(
+                    badge.foreground,
+                    BlendMode.srcIn,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: colors.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      widget.subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: colors.textMuted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+          child: ProgressButton(
+            text: context.l10n.irSendToDevice,
+            color: colors.accent,
+            progress: _sending ? _sendProgress : null,
+            showPercent: _sending,
+            onPressed: _sending ? null : _send,
+            height: 48,
+            borderRadius: 10,
+            horizontalPadding: 16,
+            textStyle: ProgressButton.defaultTextStyle.copyWith(fontSize: 22),
+          ),
+        ),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Container(
+                margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                width: constraints.maxWidth - 28,
+                decoration: BoxDecoration(
+                  color: colors.terminalBackground,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: colors.divider),
+                ),
+                child: Scrollbar(
+                  controller: _viewScroll,
+                  child: SingleChildScrollView(
+                    controller: _viewScroll,
+                    padding: const EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: SelectableText(
+                        widget.text,
+                        style: TextStyle(
+                          color: colors.terminalText,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}

@@ -1,0 +1,558 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../../services/localization/l10n.dart';
+import '../../../services/permissions/permission.dart';
+import '../../../components/cardlist.dart';
+import '../../../components/dialogs/storage_permission.dart';
+import '../../../components/permission_notice.dart';
+import '../../../components/icon.dart';
+import '../../../components/navigation.dart';
+import '../../../theme/theme.dart';
+import '../../../components/notification.dart';
+import '../browser/page.dart';
+import '../browser/widgets/storage_card.dart';
+import '../../devices/device_scope.dart';
+import 'category/category_page.dart';
+import 'category/deleted_page.dart';
+import 'controller.dart';
+import 'rename_key.dart';
+import '../../../components/archive/category.dart';
+import '../../../components/archive/models/fap.dart';
+import '../../../components/archive/models/key.dart';
+import '../../../components/codec/fap/icon.dart';
+import '../../../components/filelist/empty_view.dart';
+import 'widgets/key_actions_sheet.dart';
+import '../../../components/filelist/progress_fill.dart';
+import 'widgets/sync_progress_view.dart';
+import 'failure_toast.dart';
+import '../../../services/archive/sort_settings.dart';
+
+class ArchivePage extends StatefulWidget {
+  const ArchivePage({
+    super.key,
+    required this.controller,
+    required this.sortSettings,
+  });
+
+  /// Built and owned by [AppShell], which keeps it across slot changes - so
+  /// this page neither creates nor disposes one.
+  final ArchiveController controller;
+
+  /// Carried only to hand on to the two tables this page pushes. Nothing on
+  /// this screen is sorted by it.
+  final ArchiveSortSettings sortSettings;
+
+  @override
+  State<ArchivePage> createState() => _ArchivePageState();
+}
+
+class _ArchivePageState extends State<ArchivePage> {
+  ArchiveController get _ctrl => widget.controller;
+
+  // Both of these load in initState - the category page its metadata, the
+  // deleted page its list - and both were missed by the first pass over this
+  // file, which guarded the storage cards two methods below and left the
+  // category cards above them alone. The push-site census is what found them.
+  // #244.
+  void _openCategory(ArchiveCategory cat) {
+    pushPage(
+      context,
+      (_) => CategoryPage(
+        controller: _ctrl,
+        sortSettings: widget.sortSettings,
+        category: cat,
+      ),
+    );
+  }
+
+  void _openDeleted() {
+    pushPage(
+      context,
+      (_) => DeletedPage(controller: _ctrl, sortSettings: widget.sortSettings),
+    );
+  }
+
+  Widget _categoriesCard(BuildContext context) {
+    final entries = <_CategoryEntry>[
+      for (final cat in ArchiveCategory.values)
+        _CategoryEntry(
+          title: cat.title,
+          asset: cat.asset,
+          color: cat.color,
+          count: _ctrl.countFor(cat),
+          onTap: () => _openCategory(cat),
+        ),
+      _CategoryEntry(
+        title: context.l10n.archiveDeleted,
+        asset: 'assets/ic/fileformat/deleted.svg',
+        color: const Color(0xFF8D8D8D),
+        count: _ctrl.deletedCount,
+        onTap: _openDeleted,
+      ),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: GroupedCardList<_CategoryEntry>(
+        items: entries,
+        onTap: (e) => e.onTap,
+        itemBuilder: _categoryTile,
+      ),
+    );
+  }
+
+  Widget _categoryTile(BuildContext context, _CategoryEntry e) {
+    final colors = context.appColors;
+    return Row(
+      children: [
+        QIconBadge(asset: e.asset, color: e.color),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            e.title,
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Text(
+          '${e.count}',
+          style: TextStyle(color: colors.textMuted, fontSize: 14),
+        ),
+        const SizedBox(width: 6),
+        Icon(Icons.chevron_right, color: colors.textMuted),
+      ],
+    );
+  }
+
+  void _openFileManager(String initialPath) {
+    // The file manager lists the path in initState, so a second tap is a
+    // second listing as well as a second page. #244.
+    final client = DeviceScope.clientOf(context);
+    pushPage(
+      context,
+      (_) => FileManagerPage(client: client, initialPath: initialPath),
+    );
+  }
+
+  Future<void> _launchFap(FapFavorite fav) async {
+    if (!_ctrl.isConnected) {
+      context.showNotification(
+        context.l10n.archiveConnectToLaunch,
+        type: QNotificationType.warning,
+      );
+      return;
+    }
+    final ok = await _ctrl.launchFapFavorite(fav);
+    // Null: see launchFapFavorite. The tap that started it owns the outcome.
+    if (!mounted || ok == null) return;
+    if (ok) {
+      unawaited(openRoute(context, AppRoute.remoteControl));
+    } else {
+      context.showNotification(
+        withArchiveReason(
+          context,
+          context.l10n.archiveLaunchFailed(fav.name),
+          _ctrl.lastFailure,
+        ),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _confirmFullSync() async {
+    final colors = context.appColors;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: colors.dialogBackground,
+        title: Text(
+          context.l10n.archiveSyncTitle,
+          style: TextStyle(color: colors.dialogText),
+        ),
+        content: Text(
+          context.l10n.archiveSyncMessage,
+          style: TextStyle(color: colors.dialogMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(context.l10n.commonCancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(context.l10n.archiveSyncAll),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _ctrl.fullSync();
+      if (!mounted) return;
+      final error = _ctrl.lastError;
+      if (error == null) return;
+      context.showNotification(
+        error,
+        type: QNotificationType.error,
+        duration: const Duration(seconds: 6),
+      );
+    }
+  }
+
+  Future<void> _showKeyActions(BuildContext context, ArchiveKey key) {
+    return KeyActionsSheet.show(
+      context,
+      _ctrl,
+      key,
+      onRename: () => _showRenameDialog(context, key),
+      onDuplicate: () async {
+        await _ctrl.duplicateKey(key);
+        if (!context.mounted) return;
+        reportArchiveFailure(
+          context,
+          _ctrl.lastFailure,
+          context.l10n.archiveDuplicateFailed,
+        );
+      },
+      onToggleFavorite: () => _ctrl.toggleFavorite(key),
+    );
+  }
+
+  Future<void> _showRenameDialog(BuildContext context, ArchiveKey key) =>
+      promptRenameKey(context, controller: _ctrl, key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (context, _) {
+        return Scaffold(
+          backgroundColor: colors.background,
+          body: SafeArea(
+            left: false,
+            right: false,
+            bottom: false,
+            child: RefreshIndicator(
+              color: colors.accent,
+              onRefresh: _confirmFullSync,
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  // Above the Flipper's own storage cards, because the two are
+                  // easy to confuse and the distinction is the reassurance:
+                  // what is on the device is unaffected, it is the copy on
+                  // this phone that cannot be read. #351.
+                  SliverToBoxAdapter(
+                    child: PermissionNotice(
+                      permission: AppPermission.storage,
+                      severity: PermissionNoticeSeverity.blocking,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      title: context.l10n.permissionStorageDeniedTitle,
+                      body: context.l10n.permissionStorageDeniedArchive,
+                      actionLabel: context.l10n.permissionStorageGrant,
+                      onAction: () => unawaited(promptStorageAccess(context)),
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 16, bottom: 4),
+                      child: StorageUsageCards(
+                        client: DeviceScope.clientOf(context),
+                        enabled: _ctrl.isConnected,
+                        onOpenInternal: () => _openFileManager('/int'),
+                        onOpenExternal: () => _openFileManager('/ext'),
+                      ),
+                    ),
+                  ),
+                  SliverToBoxAdapter(child: _categoriesCard(context)),
+                  if (_ctrl.syncing)
+                    SliverToBoxAdapter(
+                      child: SyncProgressView(progress: _ctrl.syncProgress),
+                    ),
+                  ..._buildKeysSlivers(context),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildKeysSlivers(BuildContext context) {
+    // Group favorites by category (preserve ArchiveCategory order).
+    final groups = <ArchiveCategory, List<ArchiveKey>>{};
+    for (final cat in ArchiveCategory.values) {
+      final starred = _ctrl.keysFor(cat).where((k) => k.favorite).toList();
+      if (starred.isNotEmpty) groups[cat] = starred;
+    }
+    final fapFavorites = _ctrl.fapFavorites;
+
+    if (groups.isEmpty && fapFavorites.isEmpty) {
+      return [
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: ArchiveEmptyView(
+            icon: Icons.star_outline_rounded,
+            title: _ctrl.loading
+                ? context.l10n.archiveLoading
+                : context.l10n.archiveNoStarred,
+            subtitle: context.l10n.archiveStarHint,
+          ),
+        ),
+      ];
+    }
+
+    final entries = <_FavEntry>[
+      for (final key in groups.values.expand((keys) => keys)) _KeyFav(key),
+      for (final fap in fapFavorites) _FapFav(fap),
+    ];
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: GroupedCardList<_FavEntry>(
+            title: context.l10n.archiveFavorites,
+            items: entries,
+            cardPadding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            onTap: (e) => switch (e) {
+              _KeyFav(:final key) => () => _showKeyActions(context, key),
+              _FapFav(:final fap) => () => _launchFap(fap),
+            },
+            backgroundBuilder: (e) => switch (e) {
+              _KeyFav(:final key) => ProgressFill(
+                progress: _ctrl.progressForKey(key),
+              ),
+              _FapFav() => null,
+            },
+            itemBuilder: (context, e) => switch (e) {
+              _KeyFav(:final key) => _KeyFavTile(
+                flipperKey: key,
+                onToggleStar: () => _ctrl.toggleFavorite(key),
+              ),
+              _FapFav(:final fap) => _FapFavTile(
+                favorite: fap,
+                onRemove: () => _ctrl.removeFapFavorite(fap),
+              ),
+            },
+          ),
+        ),
+      ),
+      const SliverToBoxAdapter(child: SizedBox(height: 96)),
+    ];
+  }
+}
+
+class _CategoryEntry {
+  const _CategoryEntry({
+    required this.title,
+    required this.asset,
+    required this.color,
+    required this.count,
+    required this.onTap,
+  });
+
+  final String title;
+  final String asset;
+  final Color color;
+  final int count;
+  final VoidCallback onTap;
+}
+
+sealed class _FavEntry {
+  const _FavEntry();
+}
+
+class _KeyFav extends _FavEntry {
+  const _KeyFav(this.key);
+
+  final ArchiveKey key;
+}
+
+class _FapFav extends _FavEntry {
+  const _FapFav(this.fap);
+
+  final FapFavorite fap;
+}
+
+class _KeyFavTile extends StatelessWidget {
+  const _KeyFavTile({required this.flipperKey, required this.onToggleStar});
+
+  final ArchiveKey flipperKey;
+  final VoidCallback onToggleStar;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Row(
+      children: [
+        QIconBadge(
+          asset: flipperKey.category.asset,
+          color: flipperKey.category.color,
+          iconSize: 22,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                flipperKey.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              _KeySubtitle(
+                category: flipperKey.category.title,
+                subFolder: flipperKey.subFolder,
+                muted: colors.textMuted,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        _FavStarButton(onTap: onToggleStar),
+      ],
+    );
+  }
+}
+
+class _FapFavTile extends StatelessWidget {
+  const _FapFavTile({required this.favorite, required this.onRemove});
+
+  final FapFavorite favorite;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final icon = favorite.icon;
+    return Row(
+      children: [
+        if (icon != null)
+          QIconBadge.xbm(
+            bytes: icon,
+            width: fapIconWidth,
+            height: fapIconHeight,
+            cacheKey: favorite.remotePath,
+            color: colors.accent,
+            iconSize: 22,
+          )
+        else
+          QIconBadge(
+            asset: 'assets/ic/app/apps.svg',
+            color: colors.accent,
+            iconSize: 22,
+          ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                favorite.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                favorite.subFolder.isEmpty
+                    ? context.l10n.navApps
+                    : favorite.subFolder,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.textMuted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        _FavStarButton(onTap: onRemove),
+      ],
+    );
+  }
+}
+
+class _FavStarButton extends StatelessWidget {
+  const _FavStarButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 32,
+        height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.amber.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(Icons.star_rounded, size: 18, color: Colors.amber.shade600),
+      ),
+    );
+  }
+}
+
+class _KeySubtitle extends StatelessWidget {
+  const _KeySubtitle({
+    required this.category,
+    required this.subFolder,
+    required this.muted,
+  });
+
+  final String category;
+  final String subFolder;
+  final Color muted;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(color: muted, fontSize: 12);
+    if (subFolder.isEmpty) {
+      return Text(
+        category,
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Row(
+      children: [
+        Flexible(
+          child: Text(
+            category,
+            style: style,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 14),
+        Flexible(
+          child: Text(
+            subFolder,
+            style: style,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}

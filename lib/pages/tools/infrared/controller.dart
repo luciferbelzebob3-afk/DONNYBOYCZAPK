@@ -1,0 +1,381 @@
+import '../../../services/localization/l10n.dart';
+
+import 'dart:async';
+import 'dart:io' as io;
+
+import 'package:flipperlib/flipperlib.dart';
+import 'package:flutter/foundation.dart';
+
+import '../../../services/progress_throttle.dart';
+import '../../../services/archive/storage.dart';
+import '../../../components/archive/category.dart';
+import 'api.dart';
+import 'local_repo.dart';
+import 'models.dart';
+import 'send.dart';
+import 'settings.dart';
+import '../../../services/logging.dart';
+
+class IrLibController extends ChangeNotifier {
+  IrLibController({
+    IrLibApi? api,
+    required this._client,
+    ArchiveStorage? storage,
+    IrLibSettingsStorage? settingsStorage,
+    IrLibLocalRepo? localRepo,
+  }) : _api = api ?? IrLibApi(),
+       _storage = storage ?? ArchiveStorage(),
+       _settingsStorage = settingsStorage ?? IrLibSettingsStorage(),
+       _localRepo = localRepo ?? IrLibLocalRepo();
+
+  IrLibApi _api;
+  final FlipperClient _client;
+  final ArchiveStorage _storage;
+  final IrLibSettingsStorage _settingsStorage;
+  final IrLibLocalRepo _localRepo;
+  IrLibSettings _settings = IrLibSettings();
+  IrLibDownloadProgress? _downloadProgress;
+  bool _downloading = false;
+  bool _localAvailable = false;
+
+  String _path = '';
+  bool _loading = false;
+  String? _error;
+  List<IrEntry> _entries = const [];
+
+  bool _searching = false;
+  String _searchQuery = '';
+  List<IrEntry> _searchResults = const [];
+  bool _searchWasPartial = false;
+  String _searchProgressPath = '';
+
+  String _deviceName = '';
+
+  IrLibApi get api => _api;
+  FlipperClient get client => _client;
+  IrLibSettings get settings => _settings;
+  IrLibLocalRepo get localRepo => _localRepo;
+  IrLibDownloadProgress? get downloadProgress => _downloadProgress;
+  bool get downloading => _downloading;
+  bool get localAvailable => _localAvailable;
+  String get path => _path;
+  bool get loading => _loading;
+
+  /// Why the list or the settings dialog on screen has nothing in it.
+  ///
+  /// Written only by the four operations whose result *is* what is rendered:
+  /// opening a folder, searching, and downloading or deleting the local
+  /// repository. Each clears it when it starts.
+  ///
+  /// Everything else keeps its failure in [lastFailure] instead. A send or a
+  /// fetch that failed used to land here too, and the page's error view
+  /// renders on `error != null && list.isEmpty` - so the next search that
+  /// matched nothing reported a disconnected Flipper as the reason. #114.
+  String? get error => _error;
+
+  String? _lastFailure;
+
+  /// Why the last thing the user asked for did not happen, for the callers
+  /// that show a message naming no cause of their own.
+  String? get lastFailure => _lastFailure;
+  List<IrEntry> get entries => _entries;
+  bool get searching => _searching;
+  String get searchQuery => _searchQuery;
+  List<IrEntry> get searchResults => _searchResults;
+
+  /// Whether at least one folder could not be listed during the last
+  /// search, so [searchResults] may be missing matches.
+  ///
+  /// Not an error: the search returned, and what it returned is real. It is
+  /// the completeness that is in doubt, which is a different sentence and
+  /// belongs beside the results rather than in place of them.
+  bool get searchWasPartial => _searchWasPartial;
+
+  String get searchProgressPath => _searchProgressPath;
+  bool get isConnected => _client.isConnected;
+  String get deviceName => _deviceName;
+
+  bool get canGoUp => _path.isNotEmpty;
+
+  String get title {
+    if (_path.isEmpty) return 'Flipper-IRDB';
+    final segs = _path.split('/');
+    return segs.last;
+  }
+
+  Future<void> initialize() async {
+    _deviceName = _client.getName() ?? '';
+    _settings = await _settingsStorage.load();
+    final root = await _localRepo.resolveRoot();
+    // Before asking, not after. The launch pass is unawaited, so without this
+    // the answer can be read while the library is still sitting under the name
+    // an interrupted swap gave it — and this result is latched for the life of
+    // the controller, so losing that race offers DOWNLOAD for the whole
+    // session over a library that is on disk. Memoised, so this awaits the
+    // pass already running rather than starting a second one.
+    await IrLibLocalRepo.recoverStranded();
+    _localAvailable = await _localRepo.exists();
+    if (_settings.localPath != root.path) {
+      _settings = _settings.copyWith(localPath: root.path);
+      await _settingsStorage.save(_settings);
+    }
+    _rebuildApi();
+    await openPath('');
+  }
+
+  Future<bool> downloadLocalRepo() async {
+    if (_downloading) return false;
+    _downloading = true;
+    _downloadProgress = IrLibDownloadProgress(stage: l10n.irDownloading);
+    _error = null;
+    notifyListeners();
+    try {
+      final throttle = ProgressThrottle();
+      final dir = await _localRepo.download(
+        owner: _settings.owner,
+        repo: _settings.repo,
+        branch: _settings.branch,
+        token: _settings.githubToken,
+        onProgress: (p) {
+          final prev = _downloadProgress;
+          _downloadProgress = p;
+          if (prev?.stage != p.stage || throttle.tick()) notifyListeners();
+        },
+      );
+      _settings = _settings.copyWith(localPath: dir.path);
+      await _settingsStorage.save(_settings);
+      _localAvailable = true;
+      _rebuildApi();
+      _path = '';
+      _searchQuery = '';
+      _searchResults = const [];
+      await openPath('', force: true);
+      return true;
+    } catch (e) {
+      _error = '$e';
+      // settings_dialog renders controller.error for this one, so the
+      // exception text reaches the user.
+      LogService.caught('[IRLib] download failed: $e');
+      return false;
+    } finally {
+      _downloading = false;
+      _downloadProgress = null;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> deleteLocalRepo() async {
+    try {
+      await _localRepo.deleteAll();
+      _localAvailable = false;
+      _rebuildApi();
+      _path = '';
+      _searchQuery = '';
+      _searchResults = const [];
+      await openPath('', force: true);
+      return true;
+    } catch (e) {
+      _error = '$e';
+      // Also rendered by settings_dialog.
+      LogService.caught('[IRLib] delete failed: $e');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> updateSettings(IrLibSettings next) async {
+    _settings = next;
+    await _settingsStorage.save(next);
+    _localAvailable = await _localRepo.exists();
+    _rebuildApi();
+    _path = '';
+    _searchQuery = '';
+    _searchResults = const [];
+    notifyListeners();
+    await openPath('', force: true);
+  }
+
+  void _rebuildApi() {
+    try {
+      _api.close();
+    } catch (_) {}
+    _api = IrLibApi(
+      owner: _settings.owner,
+      repo: _settings.repo,
+      branch: _settings.branch,
+      token: _settings.githubToken,
+      localRoot: _localAvailable ? _settings.localPath : '',
+    );
+  }
+
+  Future<void> refresh() => openPath(_path, force: true);
+
+  Future<void> openPath(String newPath, {bool force = false}) async {
+    _path = _normalize(newPath);
+    _loading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      if (force) _api.invalidateList(_path);
+      final list = await _api.listDir(_path);
+      _entries = list;
+    } catch (e) {
+      _error = '$e';
+      _entries = const [];
+      // The page's error view needs an empty list, and reads searchResults
+      // while a search is on screen - so a refresh under one that matched
+      // shows those matches and says nothing. #114.
+      LogService.warn('[IRLib] list "$_path" failed: $e');
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> goUp() async {
+    if (!canGoUp) return;
+    final idx = _path.lastIndexOf('/');
+    final parent = idx <= 0 ? '' : _path.substring(0, idx);
+    await openPath(parent);
+  }
+
+  Future<void> startSearch(String query) async {
+    final q = query.trim();
+    _searchQuery = q;
+    if (q.isEmpty) {
+      _searching = false;
+      _searchResults = const [];
+      notifyListeners();
+      return;
+    }
+    if (_searching) return;
+    _searching = true;
+    _searchResults = const [];
+    _searchWasPartial = false;
+    _searchProgressPath = '';
+    // A search starting is a new answer to the same question, so whatever
+    // the last one said no longer applies.
+    _error = null;
+    notifyListeners();
+    try {
+      final throttle = ProgressThrottle();
+      final search = await _api.searchAllIrFiles(
+        query: q,
+        onProgress: (found, current) {
+          _searchProgressPath = current;
+          if (throttle.tick()) notifyListeners();
+        },
+      );
+      _searchResults = search.entries;
+      // A folder that would not list prunes its whole subtree, and the result
+      // cap cuts the walk off, so this list can be short for a reason the user
+      // cannot see. Saying so is the difference between a short list and a
+      // wrong one. #351.
+      _searchWasPartial = !search.complete;
+    } catch (e) {
+      _error = '$e';
+      // _searchResults is cleared above the try, so the page's error view
+      // has the empty list it needs and renders the exception text.
+      LogService.caught('[IRLib] search "$q" failed: $e');
+    } finally {
+      _searching = false;
+      notifyListeners();
+    }
+  }
+
+  void clearSearch() {
+    _searchQuery = '';
+    _searchResults = const [];
+    _searchWasPartial = false;
+    _searching = false;
+    // Back to the listing, so a search's error stops describing what is on
+    // screen. Leaving it is how the page came to explain an empty folder
+    // with the reason a search failed.
+    _error = null;
+    notifyListeners();
+  }
+
+  Future<List<int>?> readFileBytes(IrEntry entry) async {
+    try {
+      return await _api.fetchFile(entry);
+    } catch (e) {
+      // Not _error: the listing behind this is fine and still on screen, and
+      // writing there is what left a stale reason for the next empty search
+      // to render. The file page shows irDownloadFailed, which names no
+      // cause - so the cause goes where that page can reach it. #114.
+      _lastFailure = '$e';
+      LogService.warn('[IRLib] fetch ${entry.path} failed: $e');
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<io.File?> saveToArchive(IrEntry entry, List<int> bytes) async {
+    try {
+      final fileName = _archiveFileName(entry.name);
+      return await _storage.saveBytes(
+        _deviceName,
+        ArchiveCategory.infrared,
+        fileName,
+        bytes,
+      );
+    } catch (e) {
+      // As above, and the viewer still reports this one as sent: it awaits
+      // through onAfterSend and keys its notification on the send alone, so
+      // a file that reached the Flipper and failed to save locally says
+      // nothing about the archive copy. That is its own gap, left named.
+      _lastFailure = '$e';
+      LogService.warn('[IRLib] save ${entry.path} failed: $e');
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> sendToFlipper(
+    IrEntry entry,
+    List<int> bytes, {
+    void Function(double progress)? onProgress,
+  }) async {
+    if (!_client.isConnected) return false;
+    try {
+      await sendIrFile(
+        _client,
+        _archiveFileName(entry.name),
+        bytes,
+        onProgress: onProgress,
+      );
+      return true;
+    } catch (e) {
+      // As above. The viewer shows irSendFailed, which names no cause; the
+      // disconnect arrives as the sentence sendIrFile raises.
+      _lastFailure = '$e';
+      LogService.warn('[IRLib] send ${entry.path} failed: $e');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  String _archiveFileName(String original) {
+    final name = original.toLowerCase().endsWith('.ir')
+        ? original
+        : '$original.ir';
+    return name.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+  }
+
+  String _normalize(String p) {
+    var s = p.trim();
+    while (s.startsWith('/')) {
+      s = s.substring(1);
+    }
+    while (s.endsWith('/')) {
+      s = s.substring(0, s.length - 1);
+    }
+    return s;
+  }
+
+  @override
+  void dispose() {
+    _api.close();
+    super.dispose();
+  }
+}

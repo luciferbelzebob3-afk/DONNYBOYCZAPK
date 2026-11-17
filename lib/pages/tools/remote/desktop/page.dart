@@ -1,0 +1,571 @@
+import 'dart:async';
+
+import 'package:flipperlib/flipperlib.dart' show FlipperClient;
+import 'package:flutter/material.dart';
+import 'package:qunleashed/components/appbar.dart';
+
+import '../../../../services/guarded.dart';
+import '../../../../components/dialogs/connection.dart';
+import '../../../../components/notification.dart';
+import '../../../../services/localization/l10n.dart';
+import '../../../../services/logging.dart';
+import '../../../../theme/theme.dart';
+import 'gif_export_dialog.dart';
+import 'gif_recorder.dart';
+import 'input/keyboard_listener.dart';
+import 'layout.dart';
+import 'media_remote.dart';
+import 'media_remote_settings.dart';
+import 'models/models.dart';
+import 'screenshot_saver.dart';
+import 'session.dart';
+import 'widgets/actions.dart';
+import 'widgets/controls.dart';
+import 'widgets/screen.dart';
+import 'widgets/wide_body.dart';
+
+class RemoteControlPage extends StatefulWidget {
+  const RemoteControlPage({
+    super.key,
+    required this.client,
+    @visibleForTesting this.mediaRemoteSupported,
+  });
+
+  /// The link this session runs on. Required rather than defaulted, so a test
+  /// passes a fake and the wire is observable. ADR 0002.
+  ///
+  /// The session follows the Flipper active on it: switching devices moves the
+  /// screen and the buttons to the new one rather than leaving them on the old.
+  final FlipperClient client;
+
+  /// Overrides the bridge's `Platform.isAndroid` gate. Wrist Remote is
+  /// Android-only, so without this a test host never installs the channel
+  /// handler and the input path cannot be driven at all.
+  @visibleForTesting
+  final bool? mediaRemoteSupported;
+
+  @override
+  State<RemoteControlPage> createState() => _RemoteControlPageState();
+}
+
+class _RemoteControlPageState extends State<RemoteControlPage>
+    with WidgetsBindingObserver {
+  late final RemoteSession _session;
+  late final GifRecorder _gifRecorder;
+  late final MediaRemoteBridge _mediaRemote;
+
+  bool _savingScreenshot = false;
+  bool _closing = false;
+
+  Timer? _recordingTick;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _gifRecorder = GifRecorder();
+    _session = RemoteSession(client: widget.client)
+      ..addListener(_onSessionChanged)
+      ..onRawFrame = _onRawFrame;
+    _mediaRemote = MediaRemoteBridge(
+      onButton: _onMediaRemoteButton,
+      supportedOverride: widget.mediaRemoteSupported,
+    );
+    unawaited(_startMediaRemote());
+  }
+
+  Future<void> _startMediaRemote() async {
+    try {
+      await _mediaRemote.start();
+    } catch (_) {
+      // The bridge already logs the failure. Initial lifecycle startup has no
+      // user gesture to attach an error notification to; settings can retry it.
+    }
+  }
+
+  Future<void> _stopMediaRemote() async {
+    try {
+      await _mediaRemote.stop();
+    } catch (_) {
+      // Mirrors _startMediaRemote. stop() cannot reject under today's contract
+      // - it clears _started before reconciling, so the branch that rethrows is
+      // unreachable from here - but teardown must never be the thing that turns
+      // a bridge failure into an unhandled async error out of dispose().
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _recordingTick?.cancel();
+    unawaited(_stopMediaRemote());
+    _session
+      ..removeListener(_onSessionChanged)
+      ..onRawFrame = null;
+    _session.dispose();
+    if (_gifRecorder.state != GifRecordingState.idle) _gifRecorder.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(guarded('[Remote] resume visuals', _session.resumeVisuals));
+      return;
+    }
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      unawaited(guarded('[Remote] pause visuals', _session.pauseVisuals));
+    }
+  }
+
+  void _onMediaRemoteButton(RemoteButton button, WristRemoteAction action) {
+    if (!mounted || _closing || !_session.inputAvailable) {
+      LogService.debug(
+        '[WristRemote] dropped ${button.name}: Remote Control unavailable',
+      );
+      return;
+    }
+    _dispatchMediaRemoteButton(button, action);
+  }
+
+  void _dispatchMediaRemoteButton(
+    RemoteButton button,
+    WristRemoteAction action,
+  ) {
+    if (action.isHold) {
+      unawaited(_holdMediaRemoteButton(button, action.duration));
+      return;
+    }
+    unawaited(_session.press(button));
+  }
+
+  Future<void> _holdMediaRemoteButton(
+    RemoteButton button,
+    Duration duration,
+  ) async {
+    // A second hold on a key that is already down would share the one
+    // _HeldButton the session keeps per key: beginHold no-ops, and whichever
+    // timer expires first releases for both, so the hold the user asked for
+    // ends early rather than late. Ask the session rather than tracking it
+    // here, so a key already held from the screen counts too.
+    //
+    // This only stops a new hold from starting. An on-screen release still
+    // ends a wrist hold early, because _onHoldEnd calls endHold unconditionally
+    // - a deliberate tap winning over a running hold is the behaviour we want.
+    if (_session.isHolding(button)) {
+      LogService.debug(
+        '[WristRemote] hold for ${button.name} already running; ignored',
+      );
+      return;
+    }
+    LogService.debug(
+      '[WristRemote] holding ${button.name} for '
+      '${duration.inMilliseconds} ms',
+    );
+    await _session.beginHold(button);
+    try {
+      await Future<void>.delayed(duration);
+    } finally {
+      await _session.endHold(button);
+    }
+  }
+
+  void _syncRecordingFlag() {
+    _session.recording = _gifRecorder.state == GifRecordingState.recording;
+  }
+
+  void _onSessionChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _onRawFrame(RawFrameData frame) {
+    if (_gifRecorder.state != GifRecordingState.recording) return;
+    final autoStop = _gifRecorder.addFrame(frame);
+    if (autoStop && mounted) {
+      _stopGifRecording();
+    }
+  }
+
+  void _startGifRecording() {
+    if (_gifRecorder.state != GifRecordingState.idle) return;
+    _gifRecorder.start(
+      _session.lastBgColor ?? 0xFFDFDFDF,
+      _session.lastFgColor ?? 0xFF000000,
+    );
+    _syncRecordingFlag();
+    _recordingTick = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (mounted) setState(() {});
+    });
+    setState(() {});
+  }
+
+  void _togglePauseGifRecording() {
+    if (_gifRecorder.state == GifRecordingState.recording) {
+      _gifRecorder.pause();
+      _recordingTick?.cancel();
+      _recordingTick = null;
+    } else if (_gifRecorder.state == GifRecordingState.paused) {
+      _gifRecorder.resume();
+      _recordingTick = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+    _syncRecordingFlag();
+    setState(() {});
+  }
+
+  Future<void> _stopGifRecording() async {
+    final state = _gifRecorder.state;
+    if (state == GifRecordingState.idle ||
+        state == GifRecordingState.encoding) {
+      return;
+    }
+
+    _recordingTick?.cancel();
+    _recordingTick = null;
+
+    // Stop accepting new frames immediately — before dialog is shown.
+    if (_gifRecorder.state == GifRecordingState.recording) {
+      _gifRecorder.pause();
+    }
+    _syncRecordingFlag();
+
+    if (_gifRecorder.frameCount == 0) {
+      _gifRecorder.cancel();
+      setState(() {});
+      return;
+    }
+
+    final export = await showGifExportDialog(context);
+    if (export == null) {
+      _gifRecorder.cancel();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    String? savedPath;
+    Object? saveError;
+
+    try {
+      final encodeFuture = _gifRecorder.encode(
+        scale: export.scale,
+        speed: export.speed,
+      );
+      if (mounted) setState(() {});
+      final gifBytes = await encodeFuture;
+      if (gifBytes != null) {
+        final path = await saveGifToAppStorage(gifBytes);
+        savedPath = path;
+        try {
+          await copyGifFileToClipboard(path);
+        } catch (e) {
+          // The file is saved and the screen says where. What does not happen
+          // is the paste the user is about to try.
+          LogService.warn('[Remote] recording saved but not copied: $e');
+        }
+      }
+    } catch (e) {
+      saveError = e;
+    } finally {
+      _gifRecorder.reset();
+    }
+
+    if (!mounted) return;
+    setState(() {});
+
+    if (saveError != null) {
+      context.showNotification(
+        context.l10n.remoteGifSaveFailed('$saveError'),
+        type: QNotificationType.error,
+      );
+    } else if (savedPath != null) {
+      context.showNotification(
+        context.l10n.remoteGifSaved(savedPath),
+        type: QNotificationType.good,
+      );
+    }
+  }
+
+  void _cancelGifRecording() {
+    _recordingTick?.cancel();
+    _recordingTick = null;
+    _gifRecorder.cancel();
+    _syncRecordingFlag();
+    setState(() {});
+  }
+
+  void _close() {
+    if (_closing) return;
+    _closing = true;
+    _session.shutdown();
+    Navigator.of(context).pop();
+  }
+
+  void _onConnection() => unawaited(
+    guarded('[Remote] connection dialog', () => promptConnectDevice(context)),
+  );
+
+  // True from entering the settings action until its dialog has closed.
+  //
+  // `_mediaRemote.start()` re-arms the native session - and reloads the
+  // preferences, but only after a load that failed, since `ensureLoaded`
+  // memoizes the one that worked. The action stayed pressable throughout, so a
+  // second press re-synced the native state and stacked a second settings
+  // dialog on the first, both editing the same store. `_copyScreenshot` below
+  // is the same shape with the guard this was missing - including handing the
+  // flag to the action, which the first draft of this left out, so the press
+  // was refused with nothing on screen to show it. #244.
+  bool _openingWristSettings = false;
+
+  Future<void> _openWristRemoteSettings() async {
+    if (_openingWristSettings) return;
+    setState(() => _openingWristSettings = true);
+    try {
+      await _wristRemoteSettings();
+    } finally {
+      if (mounted) setState(() => _openingWristSettings = false);
+    }
+  }
+
+  /// The body, with no guard: call [_openWristRemoteSettings].
+  Future<void> _wristRemoteSettings() async {
+    Object? startError;
+    try {
+      // Reconcile again on an explicit settings action. This re-arms a page
+      // whose initial preference/native startup failed without requiring the
+      // user to leave and reopen Remote Control.
+      await _mediaRemote.start();
+    } catch (e) {
+      startError = e;
+    }
+
+    if (!mounted) return;
+    if (startError != null) {
+      // start() fails two ways, and they need different copy: the preferences
+      // would not load, or they loaded and Android refused the session. The
+      // second leaves every setting intact, so telling the user they could not
+      // be loaded and then opening a dialog full of them says two things at
+      // once.
+      context.showNotification(
+        startError is WristRemoteStartException
+            ? context.l10n.wristRemoteStartFailed('$startError')
+            : context.l10n.wristRemoteSettingsLoadFailed('$startError'),
+        type: QNotificationType.error,
+      );
+    }
+
+    try {
+      await showMediaRemoteSettingsDialog(context, _mediaRemote);
+    } catch (e) {
+      // A load failure was already reported above, and the dialog's own
+      // ensureLoaded is a second real attempt at the same broken store - it
+      // fails the same way and would say the same thing twice. The dialog is
+      // still worth attempting: a native-only start failure leaves startError
+      // set with the preferences intact, and opening is what lets the user
+      // turn Wrist Remote back off.
+      if (!mounted || startError != null) return;
+      context.showNotification(
+        context.l10n.wristRemoteSettingsLoadFailed('$e'),
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _copyScreenshot() async {
+    if (_savingScreenshot) return;
+    setState(() => _savingScreenshot = true);
+    try {
+      final png = _session.capturePng();
+      if (png == null || !mounted) return;
+      await copyScreenshotToClipboard(png);
+      if (!mounted) return;
+      context.showNotification(
+        context.l10n.remoteScreenshotCopied,
+        type: QNotificationType.good,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      context.showNotification(
+        context.l10n.remoteCopyFailed('$e'),
+        type: QNotificationType.error,
+      );
+    } finally {
+      if (mounted) setState(() => _savingScreenshot = false);
+    }
+  }
+
+  Future<void> _saveScreenshot() async {
+    if (_savingScreenshot) return;
+    setState(() => _savingScreenshot = true);
+    try {
+      final png = _session.capturePng();
+      if (png == null || !mounted) return;
+      final path = await saveScreenshotToAppStorage(png);
+      if (!mounted) return;
+      context.showNotification(
+        context.l10n.remoteScreenshotSaved(path),
+        type: QNotificationType.good,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      context.showNotification(
+        context.l10n.remoteSaveFailed('$e'),
+        type: QNotificationType.error,
+      );
+    } finally {
+      if (mounted) setState(() => _savingScreenshot = false);
+    }
+  }
+
+  void _onHoldBegin(RemoteButton b) => unawaited(_session.beginHold(b));
+  void _onHoldEnd(RemoteButton b) => unawaited(_session.endHold(b));
+
+  bool get _streamVertical =>
+      _session.orientation == StreamOrientation.vertical ||
+      _session.orientation == StreamOrientation.verticalFlip;
+
+  Widget _actions(RemoteLayout layout) {
+    return RemoteActions(
+      size: layout.actionsSize,
+      gifState: _gifRecorder.state,
+      gifElapsedMs: _gifRecorder.elapsedMs,
+      justUnlocked: _session.justUnlocked,
+      savingScreenshot: _savingScreenshot,
+      onCopy: _copyScreenshot,
+      onSave: _saveScreenshot,
+      onUnlock: _session.unlock,
+      onStartGif: _startGifRecording,
+      onPauseResumeGif: _togglePauseGifRecording,
+      onStopGif: _stopGifRecording,
+      onCancelGif: _cancelGifRecording,
+    );
+  }
+
+  Widget _screen(RemoteLayout layout) {
+    return RemoteScreen(
+      size: layout.screenSize,
+      frameListenable: _session.frameListenable,
+      queue: _session.queue,
+      orientation: _session.orientation,
+    );
+  }
+
+  Widget _controls(RemoteLayout layout) {
+    return RemoteControls(
+      size: layout.controlsSize,
+      arrangement: layout.controlsArrangement,
+      onHoldBegin: _onHoldBegin,
+      onHoldEnd: _onHoldEnd,
+    );
+  }
+
+  Widget _wideBody(RemoteLayout layout) {
+    return RemoteWideBody(
+      layout: layout,
+      frameListenable: _session.frameListenable,
+      queue: _session.queue,
+      orientation: _session.orientation,
+      connected: _session.inputAvailable,
+      gifState: _gifRecorder.state,
+      gifElapsedMs: _gifRecorder.elapsedMs,
+      justUnlocked: _session.justUnlocked,
+      savingScreenshot: _savingScreenshot,
+      onBack: _close,
+      onConnection: _onConnection,
+      onCopy: _copyScreenshot,
+      onSave: _saveScreenshot,
+      onUnlock: _session.unlock,
+      onStartGif: _startGifRecording,
+      onPauseResumeGif: _togglePauseGifRecording,
+      onStopGif: _stopGifRecording,
+      onCancelGif: _cancelGifRecording,
+      onHoldBegin: _onHoldBegin,
+      onHoldEnd: _onHoldEnd,
+      // Null while one is opening, so the refused press is visible rather than
+      // merely refused - `savingScreenshot` above does the same job for the
+      // two screenshot actions.
+      onWristRemoteSettings: _mediaRemote.supported && !_openingWristSettings
+          ? _openWristRemoteSettings
+          : null,
+    );
+  }
+
+  Widget _narrowBody(RemoteLayout layout) {
+    return Column(
+      children: [
+        _actions(layout),
+        const SizedBox(height: RemoteLayout.actionsSpacing),
+        Expanded(child: Center(child: _screen(layout))),
+        const SizedBox(height: RemoteLayout.gap),
+        _controls(layout),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final wide = RemoteLayout.isWide(MediaQuery.sizeOf(context));
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (_, _) => _close(),
+      child: RemoteKeyboardListener(
+        onHoldBegin: (b) => unawaited(_session.beginHold(b)),
+        onHoldEnd: (b) => unawaited(_session.endHold(b)),
+        child: Scaffold(
+          backgroundColor: colors.background,
+          appBar: wide
+              ? null
+              : QPageAppBar(
+                  client: _session.client,
+                  title: context.l10n.remoteControlTitle,
+                  leading: IconButton(
+                    onPressed: _close,
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+                  actions: [
+                    IconButton(
+                      tooltip: context.l10n.connectSearch,
+                      onPressed: _onConnection,
+                      icon: const Icon(Icons.search),
+                    ),
+                    if (_mediaRemote.supported)
+                      IconButton(
+                        tooltip: context.l10n.wristRemoteMappingTitle,
+                        // Gated like the wide layout's action below: the two
+                        // entry points are the same handler, and only one of
+                        // them showed the refusal.
+                        onPressed: _openingWristSettings
+                            ? null
+                            : _openWristRemoteSettings,
+                        icon: const Icon(Icons.watch_outlined),
+                      ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+          body: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final layout = RemoteLayout.resolve(
+                  constraints.biggest,
+                  _streamVertical,
+                  wide: wide,
+                );
+                return layout.wide
+                    ? _wideBody(layout)
+                    : Padding(
+                        padding: layout.padding,
+                        child: _narrowBody(layout),
+                      );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

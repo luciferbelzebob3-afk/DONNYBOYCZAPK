@@ -1,0 +1,591 @@
+import 'dart:async';
+
+import 'package:flipperlib/flipperlib.dart';
+import 'package:flutter/material.dart';
+
+import '../cancel_spinner.dart';
+import '../notification.dart';
+import '../permission_notice.dart';
+import '../../services/connection/connect_report.dart';
+import '../../services/connection/link_service.dart';
+import '../../services/localization/l10n.dart';
+import '../../services/guarded.dart';
+import '../../services/logging.dart';
+import '../../services/permissions/center.dart';
+import '../../services/permissions/permission.dart';
+import '../../services/permissions/probes.dart';
+import '../../services/permissions/scope.dart';
+import '../../theme/theme.dart';
+import '../../pages/devices/device_scope.dart';
+import 'connection_error.dart';
+
+Future<FlipperDevice?> showConnectionDialog(
+  BuildContext context, {
+  bool usbOnly = false,
+}) {
+  // Read here rather than inside the dialog: ADR 0011 put the device scope
+  // above the Navigator, so every caller of this has one - and the dialog
+  // reaching for the global itself was the last thing in `components`
+  // resolving its own. ADR 0002.
+  final client = DeviceScope.clientOf(context);
+  return showDialog<FlipperDevice>(
+    context: context,
+    barrierColor: FlipperOriginalColors.barrier,
+    builder: (_) => ConnectionDialog(client: client, usbOnly: usbOnly),
+  );
+}
+
+/// Picks a device with [showConnectionDialog] and opens its link, reporting
+/// a failed attempt with the shared error dialog.
+Future<void> promptConnectDevice(BuildContext context) async {
+  final selected = await showConnectionDialog(context);
+  if (selected == null || !context.mounted) return;
+  await connectPickedDevice(context, selected);
+}
+
+Future<void> connectPickedDevice(
+  BuildContext context,
+  FlipperDevice device,
+) async {
+  try {
+    await LinkService.instance.connectDevice(device);
+  } catch (e, st) {
+    // Reported before the mounted check, not after: a user who left the
+    // screen while the dial was in flight is a failure nobody sees a dialog
+    // for, which is the one most worth counting. ADR 0013 §2.
+    reportConnectFailure(
+      e,
+      st,
+      attempt: ConnectAttempt.manual,
+      isBle: device.isBle,
+    );
+    if (!context.mounted) return;
+    await showConnectionFailedDialog(context, e, isBle: device.isBle);
+  }
+}
+
+/// Opens the link of a connection-list row, reporting a failed attempt with
+/// the shared error dialog. A remembered BLE device that stayed silent is not
+/// a failure: the row itself shows it as out of range.
+Future<void> connectLinkEntry(BuildContext context, LinkEntry entry) async {
+  try {
+    await LinkService.instance.connect(entry);
+  } catch (e, st) {
+    reportConnectFailure(
+      e,
+      st,
+      attempt: ConnectAttempt.manual,
+      isBle: entry.isBle,
+    );
+    if (!context.mounted) return;
+    await showConnectionFailedDialog(context, e, isBle: entry.isBle);
+  }
+}
+
+class ConnectionDialog extends StatefulWidget {
+  const ConnectionDialog({
+    super.key,
+    required this.client,
+    this.usbOnly = false,
+  });
+
+  /// The link this picker scans and connects on.
+  final FlipperClient client;
+
+  /// Lists only what arrived over a cable, and says so — see [_buildHeader].
+  final bool usbOnly;
+
+  @override
+  State<ConnectionDialog> createState() => _ConnectionDialogState();
+}
+
+class _ConnectionDialogState extends State<ConnectionDialog> {
+  FlipperClient get _client => widget.client;
+
+  StreamSubscription<List<FlipperDevice>>? _devicesSub;
+  StreamSubscription<List<FlipperSessionInfo>>? _sessionsSub;
+  bool _scanning = false;
+  bool _filterEnabled = true;
+  List<FlipperDevice> _displayed = [];
+  List<FlipperSessionInfo> _sessions = const [];
+  final Set<String> _disconnecting = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _sessions = _client.sessions;
+    _devicesSub = _client.devicesStream.listen(_onDevicesUpdate);
+    _sessionsSub = _client.sessionsStream.listen(_onSessionsUpdate);
+    _displayed = _filterDevices(_client.devices);
+    if (!_client.isConnecting) _startScan();
+  }
+
+  @override
+  void dispose() {
+    _devicesSub?.cancel();
+    _sessionsSub?.cancel();
+    // Guarded rather than discarded: closing the picker while a scan is
+    // failing rejected a future nobody was holding, and that arrives as an
+    // unlabelled [uncaught] with no operation on it. #120.
+    unawaited(guarded('[Picker] stop scan', _client.stopScan));
+    super.dispose();
+  }
+
+  /// Writes the transport's answer into the shared record.
+  ///
+  /// Through the scope rather than a field, so the notice below clears
+  /// itself when the user grants the permission in system settings and
+  /// comes back - the picker can be the thing on screen the whole time.
+  void _recordBleAccess(BleAccess access) {
+    // Captured in `initState` rather than looked up here, which is what lets
+    // this record unconditionally. Guarded on `mounted` it discarded the
+    // *answer* and not just the redraw: the system BLE dialog being answered
+    // is what closes this sheet, so the denial arrived at an unmounted picker
+    // and reached nobody. Android permission dialogs do not reliably take the
+    // activity out of `resumed`, so the lifecycle re-read may never fire
+    // either, and the user is back to "No devices found." #351.
+    _permissions?.record(AppPermission.bluetooth, outcomeOfBleAccess(access));
+  }
+
+  /// The permission record, captured while this still has a context.
+  ///
+  /// `didChangeDependencies` and not `initState`, because reading an
+  /// inherited widget in `initState` does not register the dependency.
+  PermissionCenter? _permissions;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _permissions = PermissionScope.maybeOf(context);
+  }
+
+  bool get _bluetoothDenied =>
+      _permissions?.outcomeOf(AppPermission.bluetooth).warrantsNotice ?? false;
+
+  /// The shared route, which also tells the user when it cannot open.
+  void _openSettings() => unawaited(
+    openPermissionSettings(context, '[Picker] opening app settings'),
+  );
+
+  static String _keyOf(FlipperDevice device) =>
+      '${device.link.name}:${device.id}';
+
+  FlipperSessionInfo? _sessionOf(FlipperDevice device) {
+    for (final session in _sessions) {
+      if (_keyOf(session.device) == _keyOf(device)) return session;
+    }
+    return null;
+  }
+
+  Future<void> _startScan() async {
+    if (_scanning) return;
+    if (mounted) setState(() => _scanning = true);
+    try {
+      // The answer is recorded rather than discarded. `requestPermissions`
+      // returned `Future<void>` until #351, so a refused BLUETOOTH_SCAN
+      // left this picker showing "No devices found." - which blames the
+      // hardware, on first run, for something the user did.
+      _recordBleAccess(await _client.initialize());
+      if (widget.usbOnly) {
+        await _client.refreshUsbOnly();
+      } else {
+        await _client.refreshDevices(bleTimeout: const Duration(seconds: 10));
+      }
+    } catch (e, st) {
+      LogService.warn('[Picker] scan error: $e');
+      // A scan is a connect attempt as far as the classifier is concerned -
+      // Bluetooth off and a busy adapter are the same two buckets - and it is
+      // the only one of the three the user starts without naming a device.
+      reportConnectFailure(
+        e,
+        st,
+        attempt: ConnectAttempt.scan,
+        isBle: !widget.usbOnly,
+      );
+      // The list the finally rebuilds is a partial one: refreshDevices
+      // clears it and re-adds held sessions and USB devices before the BLE
+      // scan that threw, so a short list reads as the whole list - worse
+      // than an obviously empty one. Bluetooth off and a busy adapter are
+      // both exactly this, and classifyConnectError already has a bucket
+      // and a sentence for each. #120.
+      if (mounted) {
+        await showConnectionFailedDialog(context, e, isBle: !widget.usbOnly);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _displayed = _filterDevices(_client.devices);
+        });
+      }
+    }
+  }
+
+  /// Guarded for the same reason as the one in `dispose`: the future is torn
+  /// off into a `VoidCallback`, so a rejection reaches only
+  /// `PlatformDispatcher.onError` and arrives in the log as an unlabelled
+  /// `[uncaught]` with nothing saying which operation it was. #120.
+  void _stopScan() =>
+      unawaited(guarded('[Picker] stop scan', _client.stopScan));
+
+  Future<void> _disconnect(FlipperDevice device) async {
+    final key = _keyOf(device);
+    if (!_disconnecting.add(key)) return;
+    setState(() {});
+    try {
+      await LinkService.instance.disconnectDevice(
+        device,
+        id: device.id,
+        link: device.link,
+      );
+    } catch (e) {
+      LogService.warn('[Picker] disconnect error: $e');
+      // The finally below clears the row whatever happened, so the picker
+      // shows the device as disconnected while the link may still be up -
+      // and the next thing the user does goes to a Flipper they believe
+      // they have let go of. As above, the connect dialog is the wrong
+      // vocabulary for this. #120.
+      if (mounted) {
+        context.showNotification(
+          context.l10n.fmFailedBecause(
+            context.l10n.connectDisconnectFailed(device.name),
+            '$e',
+          ),
+          type: QNotificationType.error,
+        );
+      }
+    } finally {
+      _disconnecting.remove(key);
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _onDevicesUpdate(List<FlipperDevice> devices) {
+    if (!mounted) return;
+    setState(() => _displayed = _filterDevices(devices));
+  }
+
+  void _onSessionsUpdate(List<FlipperSessionInfo> sessions) {
+    if (!mounted) return;
+    setState(() {
+      _sessions = sessions;
+      _displayed = _filterDevices(_client.devices);
+    });
+  }
+
+  List<FlipperDevice> _filterDevices(List<FlipperDevice> devices) {
+    Iterable<FlipperDevice> filtered = devices;
+    if (widget.usbOnly) {
+      filtered = filtered.where((d) => d.isUsb);
+    }
+    if (_filterEnabled) {
+      filtered = filtered.where(_client.isFlipperDevice);
+    }
+    final result = filtered.toList();
+    final listed = {for (final d in result) _keyOf(d)};
+    for (final session in _sessions.reversed) {
+      final device = session.device;
+      if (!(session.connected || session.connecting)) continue;
+      if (widget.usbOnly && !device.isUsb) continue;
+      if (listed.add(_keyOf(device))) result.insert(0, device);
+    }
+    return result;
+  }
+
+  void _removeFilter() {
+    setState(() {
+      _filterEnabled = false;
+      _displayed = _filterDevices(_client.devices);
+    });
+  }
+
+  void _restoreFilter() {
+    setState(() {
+      _filterEnabled = true;
+      _displayed = _filterDevices(_client.devices);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Dialog(
+      backgroundColor: colors.dialogBackground,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildHeader(),
+            Divider(height: 1, color: colors.dialogDivider),
+            Flexible(child: _buildList()),
+            Divider(height: 1, color: colors.dialogDivider),
+            _buildFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+      child: Row(
+        // The reason line makes the title column taller than the control
+        // beside it, which stays on the title's line rather than centring
+        // against both.
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.usbOnly
+                      ? context.l10n.pickerSelectUsbDevice
+                      : context.l10n.pickerSelectDevice,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: colors.dialogText,
+                  ),
+                ),
+                // Beside the title it already picks, because it is the other
+                // half of the same statement: a narrowed list has no
+                // Bluetooth device in it, and a title saying only that this
+                // is a USB list reads as the app not having the transport
+                // rather than as this screen not being able to use it. The
+                // one caller is the command line, whose link cannot carry a
+                // CLI at all (`supportsCli` is false on the BLE transport);
+                // the dialog that said so went away in aa55e5c4 and nothing
+                // has said it since. Derived here rather than passed in, so
+                // the next caller to narrow the list is explained too - a
+                // sentence a caller has to remember is a sentence that goes
+                // missing. #381.
+                if (widget.usbOnly) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    context.l10n.pickerUsbOnlyReason,
+                    style: TextStyle(fontSize: 12, color: colors.dialogMuted),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (_scanning)
+            // The same control as a connecting row carries: a search that
+            // cannot be called off left the dialog with a spinner to wait out
+            // and a refresh button that only came back once it was over.
+            QCancelSpinner(
+              onCancel: _stopScan,
+              size: 20,
+              color: colors.accent,
+              tooltip: context.l10n.commonCancel,
+            )
+          else
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: IconButton(
+                onPressed: _startScan,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                iconSize: 20,
+                color: colors.accent,
+                icon: const Icon(Icons.refresh),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    final colors = context.appColors;
+    if (_displayed.isEmpty) {
+      // A denial before the empty-room sentence, on a BLE-capable picker
+      // that has finished scanning. Not on a USB-only one: there the
+      // Bluetooth permission is beside the point, and saying so would be a
+      // second wrong cause rather than a fix for the first.
+      if (!widget.usbOnly && !_scanning && _bluetoothDenied) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          child: PermissionNotice(
+            permission: AppPermission.bluetooth,
+            severity: PermissionNoticeSeverity.blocking,
+            padding: EdgeInsets.zero,
+            icon: Icons.bluetooth_disabled,
+            title: context.l10n.permissionBluetoothDeniedTitle,
+            body: context.l10n.permissionBluetoothDeniedPicker,
+            onAction: _openSettings,
+          ),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+        child: Text(
+          _scanning
+              ? context.l10n.pickerSearching
+              : (widget.usbOnly
+                    ? context.l10n.pickerWaitingUsb
+                    : context.l10n.pickerNoDevices),
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colors.dialogMuted, fontSize: 14),
+        ),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      itemCount: _displayed.length,
+      separatorBuilder: (_, _) =>
+          Divider(height: 1, color: FlipperOriginalColors.dialogDivider),
+      itemBuilder: (_, i) {
+        final device = _displayed[i];
+        final session = _sessionOf(device);
+        final connecting = session?.connecting ?? false;
+        final connected = !connecting && (session?.connected ?? false);
+        final active = connected && session!.active;
+        final held = connected || connecting;
+        return _DeviceListItem(
+          device: device,
+          connected: connected,
+          connecting: connecting,
+          disconnecting: held && _disconnecting.contains(_keyOf(device)),
+          onDisconnect: held ? () => _disconnect(device) : null,
+          onTap: active || connecting
+              ? null
+              : () => Navigator.of(context).pop(device),
+        );
+      },
+    );
+  }
+
+  Widget _buildFooter() {
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: _filterEnabled
+          ? TextButton(
+              onPressed: _removeFilter,
+              style: TextButton.styleFrom(foregroundColor: colors.dialogMuted),
+              child: Text(context.l10n.pickerCantFindDevice),
+            )
+          : TextButton(
+              onPressed: _restoreFilter,
+              style: TextButton.styleFrom(foregroundColor: colors.dialogMuted),
+              child: Text(context.l10n.pickerShowOnlyDevices),
+            ),
+    );
+  }
+}
+
+class _DeviceListItem extends StatelessWidget {
+  const _DeviceListItem({
+    required this.device,
+    required this.onTap,
+    this.connected = false,
+    this.connecting = false,
+    this.disconnecting = false,
+    this.onDisconnect,
+  });
+
+  final FlipperDevice device;
+  final VoidCallback? onTap;
+  final bool connected;
+  final bool connecting;
+  final bool disconnecting;
+  final VoidCallback? onDisconnect;
+
+  bool get _held => connected || connecting;
+
+  Widget _buildTrailing(BuildContext context, QAppColors colors) {
+    if (disconnecting) {
+      return SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.5,
+          color: colors.danger,
+        ),
+      );
+    }
+    if (connecting) return QCancelSpinner(onCancel: onDisconnect);
+    return Tooltip(
+      message: l10n.pickerDisconnect,
+      child: InkResponse(
+        onTap: onDisconnect,
+        radius: 22,
+        child: Icon(Icons.link_off, size: 22, color: colors.danger),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final isBle = device.isBle;
+    final subtitle = connecting
+        ? context.l10n.pickerConnecting
+        : connected
+        ? context.l10n.connectTapToSwitch
+        : (isBle ? device.id : (device.serialNumber ?? device.id));
+
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Icon(
+              isBle
+                  ? (_held ? Icons.bluetooth_connected : Icons.bluetooth)
+                  : Icons.usb,
+              color: isBle ? colors.info : colors.accent,
+              size: 28,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    device.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: colors.dialogText,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: colors.dialogMuted),
+                  ),
+                ],
+              ),
+            ),
+            if (_held)
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: _buildTrailing(context, colors),
+              )
+            else if (device.rssi != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Text(
+                  '${device.rssi} dBm',
+                  style: TextStyle(fontSize: 12, color: colors.dialogMuted),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

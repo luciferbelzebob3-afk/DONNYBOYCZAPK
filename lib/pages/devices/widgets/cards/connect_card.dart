@@ -1,0 +1,237 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../../../../components/cancel_spinner.dart';
+import '../../../../components/dialogs/connection.dart';
+import '../../../../services/connection/link_service.dart';
+import '../../../../services/guarded.dart';
+import '../../../../services/localization/l10n.dart';
+import '../../../../theme/theme.dart';
+import '../page_card.dart';
+
+class ConnectCard extends StatelessWidget {
+  const ConnectCard({super.key, required this.links});
+
+  /// The connection list this card draws. Passed in rather than reached for,
+  /// the way `AutoConnectHintCard` beside it takes it, so what the card says
+  /// with nothing connected can be exercised at all. ADR 0002.
+  final LinkService links;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+
+    return ListenableBuilder(
+      listenable: links,
+      builder: (context, _) {
+        final entries = links.entries;
+        return FlipperPageCard(
+          child: Column(
+            children: [
+              _ConnectActionRow(onTap: () => promptConnectDevice(context)),
+              for (final entry in entries) ...[
+                Divider(height: 1, color: colors.divider),
+                _DeviceRow(
+                  entry: entry,
+                  onTap: () => connectLinkEntry(context, entry),
+                  // Both tear a Future off into a VoidCallback, so a
+                  // rejection reached only PlatformDispatcher.onError and
+                  // arrived in the log as an unlabelled [uncaught] with no
+                  // operation on it. Named, so a bug report says which. #120.
+                  onDisconnect: () => unawaited(
+                    guarded('[ConnectCard] disconnect', () async {
+                      await links.disconnect(entry);
+                    }),
+                  ),
+                  onForget: entry.isBle && !entry.held
+                      ? () => unawaited(
+                          guarded('[ConnectCard] forget', () async {
+                            await links.forget(entry);
+                          }),
+                        )
+                      : null,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ConnectActionRow extends StatelessWidget {
+  const _ConnectActionRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final accent = colors.accent;
+    final strings = context.l10n;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Row(
+            children: [
+              Icon(Icons.search, size: 24, color: accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      strings.connectSearch,
+                      style: TextStyle(
+                        color: accent,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    // The rows below are plugged-in Flippers and Bluetooth
+                    // ones already connected once, so on a phone that has
+                    // never paired - or has forgotten the device - this row is
+                    // the only thing on the page that says Bluetooth is a
+                    // transport at all. With a Flipper on the cable the rows
+                    // are USB and nothing else, which is how the card came to
+                    // be read as a USB-only screen. #381.
+                    //
+                    // Wrapping rather than ellipsized like the device rows
+                    // under it: those truncate a name the user already knows,
+                    // while this is the sentence carrying the information, and
+                    // the translations are longer than the English.
+                    Text(
+                      strings.connectSearchSubtitle,
+                      style: TextStyle(fontSize: 12, color: colors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DeviceRow extends StatelessWidget {
+  const _DeviceRow({
+    required this.entry,
+    required this.onTap,
+    required this.onDisconnect,
+    this.onForget,
+  });
+
+  final LinkEntry entry;
+  final VoidCallback onTap;
+  final VoidCallback onDisconnect;
+  final VoidCallback? onForget;
+
+  String _subtitle(BuildContext context) {
+    final strings = context.l10n;
+    if (entry.busy) return strings.pickerConnecting;
+    switch (entry.session) {
+      case LinkSession.active:
+        return strings.connectActive;
+      case LinkSession.connected:
+        return strings.connectTapToSwitch;
+      case LinkSession.connecting:
+        return strings.pickerConnecting;
+      case LinkSession.none:
+        return entry.address;
+    }
+  }
+
+  Color _iconColor(QAppColors colors) {
+    if (entry.session == LinkSession.active) return colors.accent;
+    if (entry.held) return colors.info;
+    return entry.isBle && entry.heard ? colors.info : colors.textMuted;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final active = entry.session == LinkSession.active;
+    final busy = entry.busy;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy || active ? null : onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Row(
+            children: [
+              Icon(
+                entry.isUsb
+                    ? (entry.held ? Icons.cable : Icons.usb)
+                    : entry.held
+                    ? Icons.bluetooth_connected
+                    : Icons.bluetooth,
+                size: 24,
+                color: _iconColor(colors),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      entry.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: colors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _subtitle(context),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: colors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (busy)
+                // A connect in flight is stopped from the row that started it.
+                // Before this the only way out was the search dialog, which
+                // holds the same session behind a second cancel button.
+                QCancelSpinner(onCancel: onDisconnect, size: 20)
+              else if (entry.held)
+                Tooltip(
+                  message: context.l10n.pickerDisconnect,
+                  child: InkResponse(
+                    onTap: onDisconnect,
+                    radius: 18,
+                    child: Icon(Icons.link_off, size: 18, color: colors.danger),
+                  ),
+                )
+              else if (onForget != null)
+                Tooltip(
+                  message: context.l10n.connectForget,
+                  child: InkResponse(
+                    onTap: onForget,
+                    radius: 18,
+                    child: Icon(Icons.close, size: 18, color: colors.textMuted),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

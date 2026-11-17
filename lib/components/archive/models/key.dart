@@ -1,0 +1,153 @@
+import '../../path.dart';
+import '../category.dart';
+
+enum ArchiveKeyState { local, synced, deleted }
+
+/// [ArchiveKey.id] from the parts, for the caller that has them before the key
+/// holding them exists.
+///
+/// That is `ArchiveController`: ingesting a local file, merging the device's
+/// listing, and composing the *new* id after a rename or a download.
+/// Everywhere else asks a key.
+String archiveKeyId({
+  required String flipperDir,
+  required String name,
+  required String extension,
+  String subFolder = '',
+}) => '$flipperDir/${subFolder.isEmpty ? '' : '$subFolder/'}$name.$extension';
+
+class ArchiveKey {
+  ArchiveKey({
+    required this.name,
+    required this.category,
+    required this.state,
+    String? extension,
+    this.subFolder = '',
+    this.remoteSize = 0,
+    this.localSize = 0,
+    this.localPath,
+    this.favorite = false,
+    this.protocol,
+    this.extra,
+    this.mtime,
+    this.meta,
+    this._flipperDir,
+    String? remotePath,
+  }) : extension = extension ?? category.extension,
+       _remotePathOverride = remotePath;
+
+  final String name;
+  final ArchiveCategory category;
+  final ArchiveKeyState state;
+  final String extension;
+  final String subFolder;
+  final int remoteSize;
+  final int localSize;
+  final String? localPath;
+  final bool favorite;
+  final String? protocol;
+  final String? extra;
+  final DateTime? mtime;
+  final Map<String, String>? meta;
+
+  /// Which of the category's [ArchiveCategory.flipperDirs] this file lives in.
+  /// Null means the primary one.
+  final String? _flipperDir;
+
+  /// When set, [remotePath] returns this verbatim instead of deriving the path
+  /// from the category dir. Lets the file manager wrap an arbitrary on-device
+  /// file (anywhere on the Flipper) in an [ArchiveKey] for emulation.
+  final String? _remotePathOverride;
+
+  String get flipperDir => _flipperDir ?? category.flipperDir;
+
+  static const Object _unset = Object();
+
+  String get fileName => '$name.$extension';
+
+  /// Which file this is, within one device's archive.
+  ///
+  /// Not [remotePath]: this is the local layout, `flipperDir` and the
+  /// sub-folder as the controller walks them, and it is what the favourites
+  /// store is keyed by - so it has to stay the string it is today. [remotePath]
+  /// maps the dir through [ArchiveCategory.remoteDirOf] and can be overridden
+  /// outright by the file manager, which makes it the wrong thing to identify
+  /// a row by.
+  ///
+  /// The overview pages each composed this inline to key a selection by, and
+  /// the controller again for the favourites and its own `_keys` map (#375) -
+  /// the file browser is the one selection that does not use it, as it keys
+  /// rows by an entry's name. Any of them spelling it differently would be a
+  /// selection that cannot be cleared, or a star that lands on nothing.
+  ///
+  /// Unique within a device's archive, but not by this string alone: `subghz`
+  /// and `wardriving` are separate categories whose dirs nest
+  /// (`subghz/wardriving`), and what keeps their files apart in `_keys` is
+  /// `ignoredSubDirs: ['wardriving']` on `subghz` in `category.dart`.
+  String get id => archiveKeyId(
+    flipperDir: flipperDir,
+    name: name,
+    extension: extension,
+    subFolder: subFolder,
+  );
+
+  /// How many bytes [name] may run to, given what [fileName] adds to it.
+  ///
+  /// Here because this is where the extension is appended: a prompt that
+  /// worked the budget out for itself would be reverse-engineering this
+  /// getter, and the arithmetic would go quietly wrong the day it appends
+  /// anything else. A name approved at the volume's own 255 reaches
+  /// `storageRename` four bytes over it, refused with no cause named - #277.
+  int get nameBudget => deviceNameBudgetFor(extension);
+
+  String get remotePath {
+    final override = _remotePathOverride;
+    if (override != null) return override;
+    final dir = ArchiveCategory.remoteDirOf(flipperDir);
+    if (subFolder.isEmpty) return '$dir/$fileName';
+    return '$dir/$subFolder/$fileName';
+  }
+
+  /// How this file is launched on the Flipper, resolved from the category's
+  /// rules against this key's protocol and metadata.
+  LaunchMethod get launchMethod =>
+      category.launch.resolve(protocol: protocol, meta: meta);
+
+  bool get onDevice => state == ArchiveKeyState.synced;
+  bool get hasLocalFile => localPath != null && localPath!.isNotEmpty;
+  bool get inLocal => state != ArchiveKeyState.deleted && hasLocalFile;
+  bool get isDeleted => state == ArchiveKeyState.deleted;
+  bool get isSynced => state == ArchiveKeyState.synced;
+
+  ArchiveKey copyWith({
+    ArchiveKeyState? state,
+    int? remoteSize,
+    int? localSize,
+    String? localPath,
+    bool? favorite,
+    String? protocol,
+    String? extra,
+    DateTime? mtime,
+    Object? meta = _unset,
+  }) {
+    return ArchiveKey(
+      name: name,
+      category: category,
+      state: state ?? this.state,
+      extension: extension,
+      subFolder: subFolder,
+      remoteSize: remoteSize ?? this.remoteSize,
+      localSize: localSize ?? this.localSize,
+      localPath: localPath ?? this.localPath,
+      favorite: favorite ?? this.favorite,
+      protocol: protocol ?? this.protocol,
+      extra: extra ?? this.extra,
+      mtime: mtime ?? this.mtime,
+      meta: identical(meta, _unset)
+          ? this.meta
+          : (meta as Map<String, String>?),
+      flipperDir: _flipperDir,
+      remotePath: _remotePathOverride,
+    );
+  }
+}

@@ -1,0 +1,425 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+import 'package:qunleashed/components/appbar.dart';
+
+import '../../../services/localization/l10n.dart';
+import '../../../services/logging.dart';
+import '../../../theme/theme.dart';
+import '../../../components/format.dart';
+import '../../../components/notification.dart';
+import '../../../components/picked_file.dart';
+import '../../../services/storage/picker_memory.dart';
+import 'models.dart';
+import 'parsing.dart';
+import 'plotter_view.dart';
+import 'ui.dart';
+import '../../devices/device_scope.dart';
+
+/// The largest capture this page will read, and it is small for a reason.
+///
+/// `parsePlotterFile` is not a streaming parser and does not pretend to be:
+/// it turns the whole buffer into a UTF-16 `String` (twice the bytes), splits
+/// that into a list of every line, and for a SubGHz RAW capture builds the
+/// pulse string with `rawData += raw` inside a loop, which is quadratic, then
+/// boxes a `double` per token. A limit set by what the *file* costs would be
+/// a limit on the wrong number - the heap this page needs is some multiple of
+/// it, and the device that produced QUNLEASHED-E allowed 256 MB in total.
+///
+/// Measured on a desktop, replaying `_processSubGhz` over synthetic RAW
+/// input: 2 MB parses in about half a second, 7 MB in four, and 32 MB in 74 -
+/// behind a spinner with no cancel, and a phone is several times slower. The
+/// curve is the quadratic, not the read.
+///
+/// 2 MB is still far past anything real: a long SubGHz recording is tens of
+/// kilobytes, an `.ir` library a few hundred. The margin is for a capture
+/// nobody has made yet, not for a file picked by mistake.
+const int _plotterImportLimit = 2 * 1024 * 1024;
+
+const double _maxContentWidth = 720;
+const double _wideContentThreshold = 1000;
+
+class PulsePlotterPage extends StatefulWidget {
+  const PulsePlotterPage({super.key, this.initialBytes, this.initialName});
+
+  final Uint8List? initialBytes;
+  final String? initialName;
+
+  @override
+  State<PulsePlotterPage> createState() => _PulsePlotterPageState();
+}
+
+class _PulsePlotterPageState extends State<PulsePlotterPage> {
+  PlotData? _data;
+  List<IrSignal> _signals = const [];
+  IrSignal? _current;
+  String? _fileName;
+  bool _loading = false;
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fileName = widget.initialName;
+    final bytes = widget.initialBytes;
+    if (bytes != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _handleBytes(bytes));
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleBytes(Uint8List bytes) async {
+    setState(() => _loading = true);
+    try {
+      final result = await compute(parsePlotterFile, bytes);
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        if (result.signals.isNotEmpty) {
+          _signals = result.signals;
+          _current = result.signals.first;
+          _data = _fromSignal(_current!);
+        } else {
+          _signals = const [];
+          _current = null;
+          _data = result.data;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      final message = e is PlotterParseException
+          ? e.message
+          : l10n.plotParseFailed;
+      context.showNotification(message, type: QNotificationType.error);
+    }
+  }
+
+  PlotData? _fromSignal(IrSignal signal) {
+    final pulses = signal.data;
+    final frequency = signal.frequency;
+    if (pulses == null || pulses.length < 2 || frequency == null) return null;
+    return PlotData(centerFreqHz: frequency, pulses: pulses);
+  }
+
+  // True while the file picker is open.
+  //
+  // `_loading` gates both buttons, but it is armed inside `_handleBytes` -
+  // *after* the picker returns - which is the too-late guard the firmware
+  // button had before #250. For the picker's whole lifetime both buttons
+  // stayed enabled and this handler re-entrant, so a second press opened a
+  // second dialog. The payload is nothing like firmware's; the shape is
+  // identical. #244.
+  bool _picking = false;
+
+  Future<void> _pickFile() async {
+    if (_picking) return;
+    setState(() => _picking = true);
+    try {
+      final file = await FilePicker.pickFile(
+        initialDirectory: await pickerStart(PickerPlace.disk),
+      );
+      if (file == null) return;
+      final path = file.path;
+      if (path == null) {
+        // Every target this app ships supplies a path, so this is a condition
+        // nobody expects rather than one the user did something to cause. It
+        // shows the same sentence as a failed read, because there is nothing
+        // different for the user to do - but a report quoting that sentence
+        // can be told apart from the other one only if this is written down.
+        LogService.caught('[Plotter] the pick carried no path: ${file.name}');
+        if (mounted) {
+          context.showNotification(
+            l10n.plotReadFailed,
+            type: QNotificationType.error,
+          );
+        }
+        return;
+      }
+      await rememberPickedFile(PickerPlace.disk, path);
+      final bytes = await readPickedFile(path, limit: _plotterImportLimit);
+      // The picker is modal to the OS and not to Flutter, so the page behind
+      // it can be left while it is open - and setState after dispose throws.
+      // The same hole was found in the firmware button while testing #250.
+      if (!mounted) return;
+      setState(() {
+        _fileName = file.name;
+        _data = null;
+        _signals = const [];
+        _current = null;
+      });
+      await _handleBytes(bytes);
+    } on PickedFileTooLarge catch (e) {
+      if (!mounted) return;
+      context.showNotification(
+        l10n.commonFileTooLarge(formatBytes(e.size), formatBytes(e.limit)),
+        type: QNotificationType.error,
+      );
+    } catch (e, st) {
+      // Reading the file is this method's own I/O now, and it is reached from
+      // a VoidCallback - so without a catch a rejection is discarded and lands
+      // in the log as [uncaught] with nothing naming it, while on screen the
+      // button just flicks back to enabled. The firmware button wraps its
+      // picker for the same reason.
+      //
+      // `caught` and not `error`: the picker refusing, or a file that went
+      // away between the pick and the read, is the user's environment rather
+      // than a defect, and an alert per occurrence is what crowded the real
+      // errors out of the SDK's cache once already. The sentence names the
+      // whole span, because the try covers the pick as well as the read.
+      LogService.caught(
+        '[Plotter] picking or reading a file failed: ${LogService.describe(e, st)}',
+      );
+      if (!mounted) return;
+      context.showNotification(
+        l10n.plotReadFailed,
+        type: QNotificationType.error,
+      );
+    } finally {
+      // Every exit above is a `return`, which a finally covers - so the guard
+      // is released without a second method to hold the body.
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _onSelectSignal(IrSignal? signal) {
+    if (signal == null) return;
+    setState(() {
+      _current = signal;
+      _data = _fromSignal(signal);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final hasContent = _data != null || _signals.isNotEmpty;
+    return Scaffold(
+      backgroundColor: colors.background,
+      appBar: QPageAppBar(
+        client: DeviceScope.clientOf(context),
+        title: context.l10n.toolPulsePlotter,
+        subtitle: _fileName,
+        showDeviceStatus: false,
+        actions: [
+          QPageAppBarAction(
+            tooltip: context.l10n.plotOpenFile,
+            icon: const Icon(Icons.folder_open_outlined),
+            onPressed: _loading || _picking ? null : _pickFile,
+          ),
+        ],
+      ),
+      body: hasContent ? _buildContent(context) : _buildEmptyState(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    return Scrollbar(
+      controller: _scrollController,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 28),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxWidth = constraints.maxWidth >= _wideContentThreshold
+                ? double.infinity
+                : _maxContentWidth;
+            return Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_signals.length > 1) ...[
+                      _SignalSelector(
+                        signals: _signals,
+                        current: _current,
+                        onChanged: _onSelectSignal,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    if (_data != null)
+                      PlotterView(key: ValueKey(_data), data: _data!)
+                    else
+                      const _NoPlotNotice(),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    final colors = context.appColors;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 32, 20, 28),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+            child: Column(
+              children: [
+                Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: colors.accent.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: _loading
+                      ? Padding(
+                          padding: const EdgeInsets.all(26),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: colors.accent,
+                          ),
+                        )
+                      : Icon(Icons.show_chart, size: 38, color: colors.accent),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  _loading
+                      ? context.l10n.plotParsing
+                      : context.l10n.plotNoSignal,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  context.l10n.plotEmptyHint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 13,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 22),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _loading || _picking ? null : _pickFile,
+                    icon: const Icon(Icons.file_upload_outlined, size: 20),
+                    label: Text(context.l10n.plotSelectFile),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: colors.accent,
+                      foregroundColor: colors.onAccent,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+                const _AboutSection(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NoPlotNotice extends StatelessWidget {
+  const _NoPlotNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return PlotterCard(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      child: Text(
+        context.l10n.plotNoRawData,
+        textAlign: TextAlign.center,
+        style: TextStyle(color: colors.textSecondary, fontSize: 13),
+      ),
+    );
+  }
+}
+
+class _SignalSelector extends StatelessWidget {
+  const _SignalSelector({
+    required this.signals,
+    required this.current,
+    required this.onChanged,
+  });
+
+  final List<IrSignal> signals;
+  final IrSignal? current;
+  final ValueChanged<IrSignal?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return DropdownButtonFormField<IrSignal>(
+      initialValue: current,
+      isExpanded: true,
+      decoration: plotterFieldDecoration(
+        context,
+        label: context.l10n.plotSignal,
+      ),
+      dropdownColor: colors.card,
+      borderRadius: BorderRadius.circular(12),
+      style: TextStyle(color: colors.textPrimary, fontSize: 14),
+      items: [
+        for (final (i, s) in signals.indexed)
+          DropdownMenuItem(
+            value: s,
+            child: Text(s.name ?? context.l10n.plotSignalNumber(i + 1)),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+}
+
+class _AboutSection extends StatelessWidget {
+  const _AboutSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final body = TextStyle(
+      color: colors.textSecondary,
+      fontSize: 13,
+      height: 1.5,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.l10n.plotAboutTitle,
+          style: TextStyle(
+            color: colors.textPrimary,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(context.l10n.plotAboutIntro, style: body),
+        const SizedBox(height: 10),
+        Text(context.l10n.plotAboutFormats, style: body),
+        Text(context.l10n.plotAboutFormatSub, style: body),
+        Text(context.l10n.plotAboutFormatRaw, style: body),
+        Text(context.l10n.plotAboutFormatIr, style: body),
+        Text(context.l10n.plotAboutFormatOther, style: body),
+        const SizedBox(height: 10),
+        Text(context.l10n.plotAboutOutro, style: body),
+      ],
+    );
+  }
+}

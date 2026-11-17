@@ -1,0 +1,410 @@
+import 'dart:io' as io;
+
+import 'package:flutter/material.dart';
+
+import '../../../services/localization/l10n.dart';
+import '../../../services/permissions/permission.dart';
+import '../../../services/permissions/scope.dart';
+import '../../../theme/theme.dart';
+import '../../../components/dialogs/storage_permission.dart';
+import '../../../components/notification.dart';
+import '../../../components/permission_notice.dart';
+import '../../../components/progress_button.dart';
+import 'controller.dart';
+import 'local_repo.dart';
+import 'settings.dart';
+
+class IrLibSettingsDialog extends StatefulWidget {
+  const IrLibSettingsDialog({super.key, required this.controller});
+
+  final IrLibController controller;
+
+  static Future<void> show(BuildContext context, IrLibController controller) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => IrLibSettingsDialog(controller: controller),
+    );
+  }
+
+  @override
+  State<IrLibSettingsDialog> createState() => _IrLibSettingsDialogState();
+}
+
+class _IrLibSettingsDialogState extends State<IrLibSettingsDialog> {
+  late TextEditingController _tokenCtrl;
+  late TextEditingController _urlCtrl;
+  String? _urlError;
+  bool _showToken = false;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.controller.settings;
+    _tokenCtrl = TextEditingController(text: s.githubToken);
+    _urlCtrl = TextEditingController(
+      text: IrdbRepoRef(owner: s.owner, repo: s.repo, branch: s.branch).toUrl(),
+    );
+    widget.controller.addListener(_onCtrl);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onCtrl);
+    _tokenCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onCtrl() {
+    if (mounted) setState(() {});
+  }
+
+  /// Whether the storage permission is refused right now.
+  ///
+  /// Read through the scope so this dialog redraws when the user grants
+  /// it in system settings and comes back - the dialog can be the thing
+  /// on screen the whole time, and nothing else would rebuild it.
+  bool _storageDenied(BuildContext context) {
+    final center = PermissionScope.maybeOf(context);
+    return center?.outcomeOf(AppPermission.storage).warrantsNotice ?? false;
+  }
+
+  IrdbRepoRef? _parsedRef() {
+    final urlText = _urlCtrl.text.trim().isEmpty
+        ? kDefaultIrdbUrl
+        : _urlCtrl.text.trim();
+    return IrdbRepoRef.tryParse(urlText);
+  }
+
+  Future<bool> _persistFields() async {
+    final ref = _parsedRef();
+    if (ref == null) {
+      setState(() => _urlError = context.l10n.irEnterValidUrl);
+      return false;
+    }
+    setState(() => _urlError = null);
+    final cur = widget.controller.settings;
+    if (cur.owner == ref.owner &&
+        cur.repo == ref.repo &&
+        cur.branch == ref.branch &&
+        cur.githubToken == _tokenCtrl.text.trim()) {
+      return true;
+    }
+    await widget.controller.updateSettings(
+      cur.copyWith(
+        owner: ref.owner,
+        repo: ref.repo,
+        branch: ref.branch,
+        githubToken: _tokenCtrl.text.trim(),
+      ),
+    );
+    return true;
+  }
+
+  Future<void> _onPrimaryAction() async {
+    if (widget.controller.downloading) return;
+    if (widget.controller.localAvailable) {
+      final ok = await widget.controller.deleteLocalRepo();
+      if (!mounted) return;
+      if (ok) {
+        context.showNotification(
+          context.l10n.irLocalDeleted,
+          type: QNotificationType.good,
+        );
+      } else {
+        context.showNotification(
+          widget.controller.error ?? context.l10n.irDeleteFailed,
+          type: QNotificationType.error,
+        );
+      }
+      return;
+    }
+    if (!await _persistFields()) return;
+    final ok = await widget.controller.downloadLocalRepo();
+    if (!mounted) return;
+    if (ok) {
+      context.showNotification(
+        context.l10n.irDownloaded,
+        type: QNotificationType.good,
+      );
+    } else {
+      context.showNotification(
+        widget.controller.error ?? context.l10n.irDownloadFailedShort,
+        type: QNotificationType.error,
+      );
+    }
+  }
+
+  Future<void> _save() async {
+    if (widget.controller.downloading) return;
+    setState(() => _saving = true);
+    final ok = await _persistFields();
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (ok) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final downloading = widget.controller.downloading;
+    final localAvailable = widget.controller.localAvailable;
+    return AlertDialog(
+      backgroundColor: colors.card,
+      title: Text('IRDB', style: TextStyle(color: colors.textPrimary)),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _field(
+                controller: _urlCtrl,
+                label: context.l10n.irRepositoryUrl,
+                colors: colors,
+                errorText: _urlError,
+                enabled: !downloading,
+              ),
+              const SizedBox(height: 8),
+              _field(
+                controller: _tokenCtrl,
+                label: context.l10n.irGithubToken,
+                colors: colors,
+                obscure: !_showToken,
+                enabled: !downloading,
+                suffix: IconButton(
+                  icon: Icon(
+                    _showToken ? Icons.visibility_off : Icons.visibility,
+                    color: colors.textMuted,
+                    size: 20,
+                  ),
+                  onPressed: () => setState(() => _showToken = !_showToken),
+                ),
+              ),
+              const _StrandedNotice(),
+              // The one surface where a denied storage permission was most
+              // misleading: `exists()` reads an unlistable library as absent,
+              // so this dialog offered to spend the whole download again on a
+              // library already on disk, and said nothing about why. #351.
+              PermissionNotice(
+                permission: AppPermission.storage,
+                severity: PermissionNoticeSeverity.blocking,
+                title: context.l10n.permissionStorageDeniedTitle,
+                body:
+                    '${context.l10n.permissionStorageDeniedIrLibrary}\n\n'
+                    '${context.l10n.permissionStorageDeniedIrStillWorks}',
+                actionLabel: context.l10n.permissionStorageGrant,
+                onAction: () => promptStorageAccess(context),
+              ),
+              const SizedBox(height: 14),
+              _PrimaryActionButton(
+                colors: colors,
+                downloading: downloading,
+                localAvailable: localAvailable,
+                storageDenied: _storageDenied(context),
+                progress: widget.controller.downloadProgress,
+                onPressed: _onPrimaryAction,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: (_saving || downloading)
+              ? null
+              : () => Navigator.of(context).pop(),
+          child: Text(
+            context.l10n.commonCancel,
+            style: TextStyle(color: colors.textMuted),
+          ),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: colors.accent),
+          onPressed: (_saving || downloading) ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(context.l10n.commonSave),
+        ),
+      ],
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required QAppColors colors,
+    bool obscure = false,
+    bool enabled = true,
+    Widget? suffix,
+    String? hint,
+    String? errorText,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      enabled: enabled,
+      style: TextStyle(color: colors.textPrimary, fontSize: 14),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: colors.textMuted, fontSize: 13),
+        hintText: hint,
+        hintStyle: TextStyle(
+          color: colors.textMuted.withValues(alpha: 0.6),
+          fontSize: 13,
+        ),
+        errorText: errorText,
+        isDense: true,
+        suffixIcon: suffix,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(
+            color: colors.textMuted.withValues(alpha: 0.3),
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(
+            color: colors.textMuted.withValues(alpha: 0.3),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: colors.accent),
+        ),
+      ),
+    );
+  }
+}
+
+/// Says the library still exists, and where.
+///
+/// The one state the app knows about and the user cannot see: an interrupted
+/// refresh left the library beside where it belongs, the restore did not land,
+/// and the recovery kept it rather than delete the only copy. Everything else
+/// reads that as no library at all, and this dialog is where the user decides
+/// whether to spend the download again — so it is the one place saying so
+/// changes what they do.
+///
+/// Listens rather than reads: a refresh can strand the library while this
+/// dialog is the thing on screen, and recovery notifies no controller.
+class _StrandedNotice extends StatelessWidget {
+  const _StrandedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<io.Directory?>(
+      valueListenable: IrLibLocalRepo.strandedLibrary,
+      builder: (context, stranded, _) => stranded == null
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: _body(context, stranded.path),
+            ),
+    );
+  }
+
+  Widget _body(BuildContext context, String path) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.info.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.info.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 18, color: colors.info),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SelectableText(
+              context.l10n.irLibraryStranded(path),
+              style: TextStyle(color: colors.textSecondary, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrimaryActionButton extends StatelessWidget {
+  const _PrimaryActionButton({
+    required this.colors,
+    required this.downloading,
+    required this.localAvailable,
+    required this.storageDenied,
+    required this.progress,
+    required this.onPressed,
+  });
+
+  final QAppColors colors;
+  final bool downloading;
+  final bool localAvailable;
+
+  /// Whether the folder this writes into cannot be read.
+  ///
+  /// Disables the button rather than letting the download run and fail
+  /// several hundred megabytes later. The notice above it is what says
+  /// why, so this does not need a label of its own.
+  final bool storageDenied;
+  final IrLibDownloadProgress? progress;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final String label;
+    final Color color = colors.accent;
+    double? value;
+    bool indeterminate = false;
+    bool showPercent = false;
+    VoidCallback? action;
+
+    if (downloading) {
+      final p = progress;
+      final unpacking =
+          p?.stage == context.l10n.irUnpacking || (p?.isExtracting ?? false);
+      final hasPercent =
+          p != null &&
+          ((unpacking && p.totalFiles > 0) ||
+              (!unpacking && (p.total > 0 || p.received > 0)));
+      label = unpacking
+          ? context.l10n.irUnpackingCaps
+          : context.l10n.irDownloadingCaps;
+      if (hasPercent) {
+        value = p.fraction;
+        showPercent = true;
+      } else {
+        indeterminate = true;
+      }
+    } else if (localAvailable) {
+      label = context.l10n.irDeleteCaps;
+      action = onPressed;
+    } else {
+      label = context.l10n.irDownloadCaps;
+      // Left null when storage is refused: nothing can be saved until the
+      // folder is writable, and a button that starts a download which
+      // cannot land is worse than one that is plainly unavailable.
+      action = storageDenied ? null : onPressed;
+    }
+
+    return ProgressButton(
+      text: label,
+      color: color,
+      progress: value,
+      indeterminate: indeterminate,
+      showPercent: showPercent,
+      onPressed: action,
+      textStyle: ProgressButton.defaultTextStyle.copyWith(fontSize: 38),
+    );
+  }
+}

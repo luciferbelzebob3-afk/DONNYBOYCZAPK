@@ -1,0 +1,616 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../../services/localization/l10n.dart';
+import '../../../components/appbar.dart';
+import '../../../components/cardlist.dart';
+import '../../../components/folder_pick.dart';
+import '../../../components/icon.dart';
+import '../../../components/navigation.dart';
+import '../../../theme/theme.dart';
+import '../../../components/notification.dart';
+import '../../../components/progress_button.dart';
+import '../../../components/fap_facts.dart';
+import '../../apps/actions.dart';
+import '../page.dart';
+import 'controller.dart';
+import '../../devices/device_scope.dart';
+
+class FliblerProjectPage extends StatefulWidget {
+  const FliblerProjectPage({super.key});
+
+  @override
+  State<FliblerProjectPage> createState() => _FliblerProjectPageState();
+}
+
+class _FliblerProjectPageState extends State<FliblerProjectPage> {
+  final FliblerProjectController _ctrl = FliblerProjectController.instance;
+  late final TextEditingController _repoField = TextEditingController(
+    text: _ctrl.repoUrl,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _repoField.addListener(() => _ctrl.setRepo(_repoField.text));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ctrl.assembler.refreshStatus();
+      _ctrl.loadRecent();
+    });
+  }
+
+  @override
+  void dispose() {
+    _repoField.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickFolder() async {
+    // Reached from a button, so a rejection here would have no listener at all
+    // and would land in the zone as a fatal uncaught error - the mechanism of
+    // QUNLEASHED-K. [pickFolder] never rejects, and reports a refusal that
+    // this platform's plugin used to hide behind a null.
+    final path = await pickFolder(
+      context,
+      what: '[Flibler] the folder pick',
+      dialogTitle: context.l10n.fliblerPickFolder,
+      place: PickerPlace.flibler,
+    );
+    if (path == null) return;
+    _repoField.clear();
+    _ctrl.setFolder(path);
+    await _ctrl.loadProject();
+  }
+
+  Future<void> _pasteLink() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isEmpty) {
+      if (mounted) {
+        context.showNotification(
+          context.l10n.fliblerClipboardEmpty,
+          type: QNotificationType.warning,
+        );
+      }
+      return;
+    }
+    _repoField.text = text;
+    await _ctrl.loadProject();
+  }
+
+  Future<void> _useRecent(FliblerRecentSource entry) async {
+    if (entry.kind == FliblerSourceKind.folder) {
+      _repoField.clear();
+      _ctrl.setFolder(entry.value);
+    } else {
+      _repoField.text = entry.value;
+    }
+    await _ctrl.loadProject();
+  }
+
+  Future<void> _build() async {
+    if (_ctrl.app == null && !await _ctrl.loadProject()) return;
+    await _ctrl.build();
+  }
+
+  // True while the app is being started on the device, for the progress the
+  // button shows. The *guard* is not here: `launchApp` owns it, keyed on the
+  // path, because this page was the third place to hand the screen over to the
+  // remote control and the third to write out the same busy dialog and the same
+  // failure toast. Its sibling `sendToDevice` has guarded on the controller's
+  // `_uploading` all along; this one had nothing, so a second press started the
+  // app again and pushed a second remote control. #244.
+  bool _launching = false;
+
+  Future<void> _openOnDevice() async {
+    setState(() => _launching = true);
+    try {
+      await launchApp(context, _ctrl.launchOnDevice, target: _ctrl.targetPath);
+    } finally {
+      // Only when still mounted: nothing reads this once the State is gone,
+      // and setState after dispose throws. A launch that failed leaves the
+      // button pressable, which is the point of releasing it here.
+      if (mounted) setState(() => _launching = false);
+    }
+  }
+
+  void _openConsole() {
+    // Nothing is fetched here - the console reads the assembler singleton - so
+    // the whole cost of a second tap is a second identical page to dismiss.
+    // Guarded anyway, because it is the same gesture and the same one call.
+    // #244.
+    pushPage(context, (_) => const AssemblerConsolePage());
+  }
+
+  void _openSettings() {
+    openRoute(context, AppRoute.assemblerSettings);
+  }
+
+  Widget _padded(Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: kGroupedHorizontalPadding),
+    child: child,
+  );
+
+  Widget _sourceField(BuildContext context) {
+    final colors = context.appColors;
+    return TextField(
+      controller: _repoField,
+      enabled: !_ctrl.busy,
+      keyboardType: TextInputType.url,
+      onSubmitted: (_) => _ctrl.loadProject(),
+      style: TextStyle(color: colors.textPrimary, fontSize: 13),
+      decoration: InputDecoration(
+        hintText: 'https://github.com/user/repo/tree/main/app',
+        hintStyle: TextStyle(color: colors.textMuted, fontSize: 13),
+        filled: true,
+        fillColor: colors.card,
+        prefixIcon: Icon(Icons.link, size: 20, color: colors.textMuted),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: context.l10n.fliblerPasteAndLoad,
+              icon: Icon(
+                Icons.content_paste_go,
+                size: 20,
+                color: colors.textSecondary,
+              ),
+              onPressed: _ctrl.busy ? null : _pasteLink,
+            ),
+            IconButton(
+              tooltip: context.l10n.fliblerChooseFolder,
+              icon: Icon(
+                Icons.folder_open,
+                size: 20,
+                color: colors.textSecondary,
+              ),
+              onPressed: _ctrl.busy ? null : _pickFolder,
+            ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
+      ),
+    );
+  }
+
+  Widget _folderCaption(BuildContext context) {
+    final colors = context.appColors;
+    return Row(
+      children: [
+        Icon(Icons.folder_outlined, size: 15, color: colors.textMuted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            _ctrl.folderPath,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: colors.textMuted,
+              fontSize: 11.5,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _header(BuildContext context) {
+    final colors = context.appColors;
+    final app = _ctrl.app!;
+    final icon = _ctrl.icon;
+    final version = app.fapVersion.join('.');
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (icon != null)
+          QIconBadge.xbm(
+            bytes: icon.xbm,
+            width: icon.width,
+            height: icon.height,
+            cacheKey: 'flibler:${app.appid}:${icon.xbm.length}',
+            color: colors.accent,
+            size: 64,
+            iconSize: 44,
+            borderRadius: 14,
+          )
+        else
+          QIconBadge(
+            asset: 'assets/ic/fileformat/plugins.svg',
+            color: colors.accent,
+            size: 64,
+            iconSize: 36,
+            borderRadius: 14,
+          ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                app.name.isEmpty ? app.appid : app.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: colors.textPrimary,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (version.isNotEmpty)
+                    _Meta(label: context.l10n.appMetaVersion, value: version),
+                  if (app.fapAuthor.isNotEmpty)
+                    _Meta(label: context.l10n.appMetaBy, value: app.fapAuthor),
+                  if (app.fapCategory.isNotEmpty)
+                    _Meta(
+                      label: context.l10n.fliblerMetaCategory,
+                      value: app.fapCategory,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _ctrl.targetPath,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textMuted,
+                  fontSize: 11.5,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bigButton(String label, Color color, VoidCallback onTap) {
+    return ProgressButton(
+      text: label,
+      color: color,
+      onPressed: onTap,
+      height: 48,
+      borderRadius: 10,
+      horizontalPadding: 24,
+    );
+  }
+
+  Widget _bigProgress(String label, Color color, {double? progress}) {
+    return ProgressButton(
+      text: label,
+      color: color,
+      progress: progress,
+      indeterminate: progress == null,
+      showPercent: progress != null,
+      height: 48,
+      borderRadius: 10,
+      horizontalPadding: 12,
+    );
+  }
+
+  Widget _actions(BuildContext context) {
+    final colors = context.appColors;
+    if (_ctrl.uploading) {
+      return _bigProgress(
+        context.l10n.fliblerUploadAction,
+        colors.accent,
+        progress: _ctrl.uploadProgress,
+      );
+    }
+    if (_ctrl.loading) {
+      return _bigProgress(context.l10n.fliblerLoadAction, colors.accent);
+    }
+    if (_ctrl.assembler.busy) {
+      return _bigProgress(context.l10n.fliblerBuildAction, colors.accent);
+    }
+
+    final built = _ctrl.fap != null;
+    final sent = _ctrl.installedPath != null;
+
+    if (built && sent) {
+      return Row(
+        children: [
+          Expanded(
+            // Progress rather than a dead button while the launch is in
+            // flight, which is what the loading and building branches above
+            // do with the same slot.
+            child: _launching
+                ? _bigProgress(context.l10n.fliblerOpenAction, colors.accent)
+                : _bigButton(
+                    context.l10n.fliblerOpenAction,
+                    colors.accent,
+                    _openOnDevice,
+                  ),
+          ),
+          const SizedBox(width: 12),
+          _SquareAction(
+            icon: Icons.upload,
+            tooltip: context.l10n.fliblerSendAgain,
+            onTap: () => _ctrl.sendToDevice(),
+          ),
+          const SizedBox(width: 8),
+          _SquareAction(
+            icon: Icons.refresh,
+            tooltip: context.l10n.fliblerRebuild,
+            onTap: _build,
+          ),
+        ],
+      );
+    }
+    if (built) {
+      return Row(
+        children: [
+          Expanded(
+            child: _bigButton(
+              context.l10n.fliblerSendAction,
+              colors.success,
+              () {
+                _ctrl.sendToDevice();
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          _SquareAction(
+            icon: Icons.refresh,
+            tooltip: context.l10n.fliblerRebuild,
+            onTap: _build,
+          ),
+        ],
+      );
+    }
+    return _bigButton(context.l10n.fliblerBuildAction, colors.accent, () {
+      if (!_ctrl.canBuild && !_ctrl.canLoad) {
+        context.showNotification(
+          context.l10n.fliblerHint,
+          type: QNotificationType.warning,
+        );
+        return;
+      }
+      _build();
+    });
+  }
+
+  Widget _status(BuildContext context) {
+    final colors = context.appColors;
+    final error = _ctrl.error;
+    final installed = _ctrl.installedPath;
+    final app = _ctrl.result?.app;
+    final text =
+        error ??
+        (installed != null
+            ? context.l10n.fliblerSentTo(installed)
+            : app != null
+            ? context.l10n.fliblerBuilt(
+                app.name.isEmpty ? app.appid : app.name,
+                _ctrl.fap?.lengthSync() ?? 0,
+              )
+            : null);
+    if (text == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: error != null ? colors.danger : colors.success,
+          fontSize: 12.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _recentTile(BuildContext context, FliblerRecentSource entry) {
+    final colors = context.appColors;
+    return Row(
+      children: [
+        Icon(
+          entry.kind == FliblerSourceKind.folder
+              ? Icons.folder_outlined
+              : Icons.link,
+          size: 20,
+          color: colors.textSecondary,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                entry.name.isEmpty ? entry.value : entry.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 14,
+                  height: 1.2,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              if (entry.name.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  entry.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.textMuted,
+                    fontSize: 11.5,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: context.l10n.fliblerRemoveRecent,
+          icon: Icon(Icons.close, size: 16, color: colors.textMuted),
+          onPressed: () => _ctrl.removeRecent(entry),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return AnimatedBuilder(
+      animation: TickerMode.valuesOf(context).enabled
+          ? Listenable.merge([_ctrl, _ctrl.assembler])
+          : Listenable.merge(const []),
+      builder: (context, _) {
+        final app = _ctrl.app;
+        return Scaffold(
+          backgroundColor: colors.background,
+          appBar: QPageAppBar(
+            client: DeviceScope.clientOf(context),
+            title: 'Flibler',
+            backgroundColor: colors.accent,
+            foregroundColor: colors.onAccent,
+            actions: [
+              QPageAppBarAction(
+                tooltip: context.l10n.fliblerConsoleTab,
+                icon: const Icon(Icons.terminal),
+                onPressed: _openConsole,
+              ),
+              QPageAppBarAction(
+                tooltip: context.l10n.fliblerTitle,
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: _openSettings,
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(0, 14, 0, 24),
+              children: [
+                _padded(_sourceField(context)),
+                if (_ctrl.kind == FliblerSourceKind.folder &&
+                    _ctrl.folderPath.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _padded(_folderCaption(context)),
+                ],
+                if (app != null) ...[
+                  const SizedBox(height: 18),
+                  _padded(_header(context)),
+                ],
+                const SizedBox(height: 16),
+                _padded(_actions(context)),
+                _padded(_status(context)),
+                if (_ctrl.builtInfo != null) ...[
+                  const SizedBox(height: 18),
+                  GroupedCardList<int>(
+                    title: context.l10n.fliblerSectionApplication,
+                    items: const [0],
+                    cardPadding: const EdgeInsets.all(12),
+                    itemBuilder: (context, _) => FapFactsPanel(
+                      info: _ctrl.builtInfo,
+                      showVerdict: false,
+                      author: app?.fapAuthor,
+                    ),
+                  ),
+                ],
+                if (_ctrl.recent.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  GroupedCardList<FliblerRecentSource>(
+                    title: context.l10n.fliblerSectionRecent,
+                    items: _ctrl.recent,
+                    onTap: (entry) =>
+                        _ctrl.busy ? null : () => _useRecent(entry),
+                    itemBuilder: _recentTile,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _Meta extends StatelessWidget {
+  const _Meta({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$label: ',
+            style: TextStyle(color: colors.textSecondary, fontSize: 13),
+          ),
+          TextSpan(
+            text: value,
+            style: TextStyle(
+              color: colors.textPrimary,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SquareAction extends StatelessWidget {
+  const _SquareAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final radius = BorderRadius.circular(10);
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: colors.divider, width: 1.25),
+        borderRadius: radius,
+      ),
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: radius,
+          child: SizedBox(
+            width: 46,
+            height: 46,
+            child: Icon(icon, color: colors.textSecondary, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}

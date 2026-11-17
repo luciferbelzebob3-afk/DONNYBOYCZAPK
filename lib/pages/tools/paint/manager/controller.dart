@@ -1,0 +1,416 @@
+import '../../../../services/localization/l10n.dart';
+
+import 'dart:async';
+import 'dart:io' as io;
+
+import 'package:flipperlib/flipperlib.dart';
+import 'package:flutter/foundation.dart';
+
+import '../../../../services/storage/paths.dart';
+import '../dolphin/dolphin_pack.dart';
+import '../dolphin/importer.dart';
+import '../dolphin/manifest.dart';
+import '../dolphin/sender.dart';
+import '../project.dart';
+import '../virtual_display_session.dart';
+import '../../../../services/logging.dart';
+
+/// Remote dolphin directory on the Flipper SD card.
+const String kDeviceDolphinPath = '/ext/dolphin';
+
+/// One animation in the library: the local project plus its manifest entry
+/// (pack membership, weight, level and butthurt ranges).
+class PaintItem {
+  PaintItem(this.project, this.entry);
+  final PaintProject project;
+  final ManifestEntry entry;
+
+  String get id => project.id;
+}
+
+/// What applying hand-edited manifest text did.
+class ManifestApplied {
+  const ManifestApplied({required this.applied, required this.nameless});
+
+  /// Animations named in the text that exist locally and were selected.
+  final int applied;
+
+  /// Paragraphs that held settings but named no animation. Dropped.
+  final int nameless;
+}
+
+/// Backs the whole Pixel Draw library screen: lists local projects (drawings,
+/// GIFs, dolphin animations and drafts) with their manifest settings, imports
+/// the device's animations, and sends the selected pack back to it.
+class ProjectManagerController extends ChangeNotifier {
+  /// [display] is the virtual-display session the previews go to.
+  ///
+  /// Defaulted to the shared one, which is what the screen wants: the editor
+  /// holds the same session, and a preview here has to give way to a canvas
+  /// there. A test passes its own, because the shared one reaches for the
+  /// app's client and would put a real display in play. ADR 0002.
+  ProjectManagerController({
+    required this._client,
+    VirtualDisplaySession? display,
+  }) : _display = display ?? VirtualDisplaySession.instance {
+    _connSub = _client.connectionStream.listen((_) => _notify());
+    _display.enter();
+  }
+
+  final FlipperClient _client;
+  final VirtualDisplaySession _display;
+  StreamSubscription<FlipperConnectionState>? _connSub;
+  bool _disposed = false;
+
+  List<PaintItem> _items = const [];
+  bool _loading = false;
+  bool _importing = false;
+  bool _sending = false;
+  ImportProgress? _importProgress;
+  SendProgress? _sendProgress;
+  String? _selectedId;
+  String? _error;
+
+  List<PaintItem> get items => _items;
+
+  /// Installs a library without reading one off disk.
+  ///
+  /// For tests. Everything the manifest screen does - selecting, editing
+  /// settings, applying pasted text - works over this list, and the real one
+  /// comes from a directory walk that a test has no business staging.
+  @visibleForTesting
+  void seedItems(List<PaintItem> items) {
+    _items = items;
+    _notify();
+  }
+
+  bool get loading => _loading;
+  bool get importing => _importing;
+  bool get sending => _sending;
+  bool get busy => _importing || _sending;
+  ImportProgress? get importProgress => _importProgress;
+  SendProgress? get sendProgress => _sendProgress;
+
+  /// The last failure nobody has been told about yet, taken once.
+  ///
+  /// Read-and-clear rather than a field the page polls, because the page
+  /// showed [_error] on every notification: a stale one re-appeared on every
+  /// tick of the weight slider after a failed scan. Taken once, it cannot.
+  ///
+  /// It also has to outlive the reload each operation ends with - delete set
+  /// it and never notified, and the reload that followed cleared it before
+  /// any listener ran, so the string was built and thrown away unread. #114.
+  String? takeFailure() {
+    final failure = _error;
+    _error = null;
+    return failure;
+  }
+
+  bool get isConnected => _client.isConnected;
+  String? get selectedId => _selectedId;
+  int get packCount => _items.where((i) => i.entry.selected).length;
+
+  PaintItem? get selected {
+    for (final i in _items) {
+      if (i.id == _selectedId) return i;
+    }
+    return null;
+  }
+
+  /// Selects an animation: it becomes the one the details pane describes and
+  /// the one mirrored on the device's external display.
+  void select(String? id) {
+    _selectedId = (_selectedId == id) ? null : id;
+    _notify();
+    _updateDevicePreview();
+  }
+
+  int _previewToken = 0;
+
+  Future<void> _updateDevicePreview() async {
+    final token = ++_previewToken;
+    final project = selected?.project;
+    if (project == null) {
+      _display.clearPreview();
+      return;
+    }
+    try {
+      final preview = await project.loadDevicePreview();
+      if (token != _previewToken || _disposed) return;
+      _display.setPreview(preview.frames, preview.delayMs);
+    } catch (e) {
+      // The user picked an animation and the Flipper shows nothing. There is
+      // no failed state on this screen to put it in - the row is selected and
+      // the device is blank - so the log is the only place it can go.
+      if (token != _previewToken || _disposed) return;
+      _display.clearPreview();
+      LogService.warn(
+        '[Paint] could not preview "${project.id}" on the device: $e',
+      );
+    }
+  }
+
+  /// Scans the local library, seeding each animation's manifest entry from the
+  /// mirrored `manifest.txt` — or from the entry already on screen, so a reload
+  /// never discards edits that have not been sent yet. When [silent] is true
+  /// the loading spinner is suppressed.
+  Future<void> loadAll({bool silent = false}) async {
+    if (!silent) {
+      _loading = true;
+      // Only a load the user asked for starts clean. A silent one is the
+      // reload another operation ends with, and clearing here is what used to
+      // swallow that operation's own failure. #114.
+      _error = null;
+    }
+    _notify();
+    try {
+      final projects = await PaintProject.scanAll();
+      final stored = await DolphinManifest.loadLocal();
+      final current = {for (final i in _items) i.entry.name: i.entry};
+      _items = [
+        for (final p in projects) PaintItem(p, _entryFor(p, current, stored)),
+      ];
+    } catch (e) {
+      // The contract for this controller: every catch sets the failure, and
+      // the page takes it on the next notification. Nothing clears it in
+      // between, which is what #114 was about.
+      _error = '$e';
+      LogService.caught('[PixelDraw] loadAll failed: $e');
+    } finally {
+      _loading = false;
+      _notify();
+    }
+  }
+
+  ManifestEntry _entryFor(
+    PaintProject p,
+    Map<String, ManifestEntry> current,
+    Map<String, ManifestEntry> stored,
+  ) {
+    final name = DolphinPack.deviceName(p);
+    final existing = current[name] ?? stored[name];
+    if (existing != null) {
+      existing.name = name;
+      return existing;
+    }
+    return ManifestEntry(name: name);
+  }
+
+  /// Permanently deletes a project's folder, then reloads.
+  Future<void> deleteProject(PaintProject project) async {
+    try {
+      final dir = io.Directory(project.path);
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+      if (_selectedId == project.id) {
+        _selectedId = null;
+        _display.clearPreview();
+      }
+    } catch (e) {
+      // This one still does not notify. It does not need to: the silent
+      // reload below notifies, and no longer clears the failure on its way
+      // past - so the page takes it there, and the project reappearing in
+      // the list comes with the reason it did.
+      _error = l10n.paintDeleteFailed('$e');
+      // Stays at warn even though the toast works now: the toast fades and a
+      // bug report about a project that would not delete has nothing in it.
+      // A surface names the outcome, the log keeps the cause, and both are
+      // wanted - the same call #112 made.
+      LogService.warn('[PixelDraw] delete failed: $e');
+    }
+    await loadAll(silent: true);
+  }
+
+  // ---------------------------------------------------------------- manifest
+
+  void toggleInPack(PaintItem item) {
+    item.entry.selected = !item.entry.selected;
+    _notify();
+  }
+
+  void selectAll() {
+    for (final i in _items) {
+      i.entry.selected = true;
+    }
+    _notify();
+  }
+
+  void deselectAll() {
+    for (final i in _items) {
+      i.entry.selected = false;
+    }
+    _notify();
+  }
+
+  void setWeight(PaintItem item, int value) {
+    item.entry.weight = value;
+    _notify();
+  }
+
+  /// Updates an entry's level/butthurt range, keeping min ≤ max.
+  void setLevels(PaintItem item, {int? min, int? max}) {
+    final e = item.entry;
+    if (min != null) e.minLevel = min.clamp(0, e.maxLevel);
+    if (max != null) e.maxLevel = max < e.minLevel ? e.minLevel : max;
+    _notify();
+  }
+
+  void setButthurt(PaintItem item, {int? min, int? max}) {
+    final e = item.entry;
+    if (min != null) e.minButthurt = min.clamp(0, e.maxButthurt);
+    if (max != null) e.maxButthurt = max < e.minButthurt ? e.minButthurt : max;
+    _notify();
+  }
+
+  /// The manifest text as it would be uploaded right now.
+  String manifestText() => DolphinManifest.build(
+    _items.where((i) => i.entry.selected).map((i) => i.entry),
+  );
+
+  /// Applies hand-edited manifest text: every animation listed there joins the
+  /// pack with the settings from the text, everything else leaves it.
+  ///
+  /// Reports how many of the listed animations exist locally, and how many
+  /// paragraphs of the text belonged to no animation at all - those are
+  /// dropped, and a user who typed one wants telling.
+  ManifestApplied applyManifest(String text) {
+    final read = DolphinManifest.parse(text);
+    final parsed = read.entries;
+    if (parsed.isEmpty) {
+      return ManifestApplied(applied: 0, nameless: read.nameless);
+    }
+    var applied = 0;
+    for (final item in _items) {
+      final edited = parsed[item.entry.name];
+      if (edited == null) {
+        item.entry.selected = false;
+        continue;
+      }
+      item.entry
+        ..selected = true
+        ..minButthurt = edited.minButthurt
+        ..maxButthurt = edited.maxButthurt
+        ..minLevel = edited.minLevel
+        ..maxLevel = edited.maxLevel
+        ..weight = edited.weight;
+      applied++;
+    }
+    _notify();
+    return ManifestApplied(applied: applied, nameless: read.nameless);
+  }
+
+  // ------------------------------------------------------------------ upload
+
+  /// Uploads the pack and, finally, the combined manifest. The virtual display
+  /// is suspended first so the RPC link is free for the transfer.
+  Future<void> send() async {
+    if (_sending) return;
+    if (!_client.isConnected) {
+      _error = l10n.paintNoDevice;
+      _notify();
+      return;
+    }
+    final selected = [
+      for (final i in _items)
+        if (i.entry.selected) (i.project, i.entry),
+    ];
+    if (selected.isEmpty) {
+      _error = l10n.paintSelectAnimation;
+      _notify();
+      return;
+    }
+
+    _sending = true;
+    _error = null;
+    _sendProgress = null;
+    _selectedId = null;
+    _notify();
+
+    await _display.suspend();
+
+    try {
+      await DolphinSender.send(
+        client: _client,
+        selected: selected,
+        onProgress: (p) {
+          _sendProgress = p;
+          _notify();
+        },
+      );
+    } catch (e) {
+      _error = l10n.paintSendFailed('$e');
+      LogService.caught('[PixelDraw] send failed: $e');
+    } finally {
+      _sending = false;
+      _sendProgress = null;
+      _display.resume();
+      _notify();
+    }
+  }
+
+  // ------------------------------------------------------------------ import
+
+  /// Mirrors the device's `/ext/dolphin` into the local library. Returns how
+  /// many files were actually transferred — zero when everything already
+  /// matched by md5. The work itself lives in [DolphinImporter]; the controller
+  /// only owns the state it publishes.
+  /// Returns how many files were transferred, or null when the import did
+  /// not finish.
+  ///
+  /// Null rather than zero, because zero is the answer that makes the page
+  /// say "already up to date" - and it said it over the failure's own toast,
+  /// which [QNotification.show] removes outright rather than fading. #114.
+  Future<int?> importFromDevice() async {
+    if (_importing) return null;
+    if (!_client.isConnected) {
+      _error = l10n.paintNoDevice;
+      _notify();
+      return null;
+    }
+    _importing = true;
+    _importProgress = null;
+    _error = null;
+    _notify();
+
+    var written = 0;
+    var failed = false;
+    try {
+      final localRoot = await appDolphinAnimationsDirectory();
+      written = await DolphinImporter.run(
+        client: _client,
+        localRoot: localRoot.path,
+        onProgress: (p) {
+          _importProgress = p;
+          _notify();
+        },
+        onFolder: () => loadAll(silent: true),
+      );
+    } catch (e) {
+      failed = true;
+      _error = l10n.paintImportFailed('$e');
+      // Stays at warn, as delete above.
+      LogService.warn('[PixelDraw] import failed: $e');
+    } finally {
+      _importing = false;
+      _importProgress = null;
+      _notify();
+    }
+
+    await loadAll(silent: true);
+    return failed ? null : written;
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _connSub?.cancel();
+    _display.clearPreview();
+    _display.leave();
+    super.dispose();
+  }
+}

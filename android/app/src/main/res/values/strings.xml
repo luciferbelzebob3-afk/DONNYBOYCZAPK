@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's own Android resources. The home-screen widget's ten strings
+     used to live here and in a hand-written values-ru/ beside it, which
+     Crowdin never saw: see #319, and the generateWidgetStrings task in
+     app/build.gradle.kts for where they are now. -->
+<resources>
+    <!-- Not translated, in any language: it is the product's name. It is also
+         not in translations/app_en.arb, which is why it is still written here
+         rather than generated. -->
+    <string name="app_name">DonnyBoy</string>
+</resources>

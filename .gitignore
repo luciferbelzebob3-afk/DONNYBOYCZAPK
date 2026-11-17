@@ -1,0 +1,144 @@
+# TEMP
+.github/FUNDING.yml
+.github/pull_request_template.md
+lib/modules/flipengine
+
+# Tools
+.codex
+.agents
+# Everything under .claude is local (worktrees, caches), except the
+# project settings that pin the Dart/Flutter agent plugin for everyone.
+.claude/*
+!.claude/settings.json
+
+# Build
+*.apk
+*.app
+*.exe
+*.zip
+*.ipa
+*.bin
+.dist/
+.build/
+.buildlog/
+
+# Signing material outside `android/`, which has its own rules for
+# `key.properties`, `**/*.keystore` and `**/*.jks` - and is where CI writes
+# both, so the release path was never exposed. These catch the keystore a
+# maintainer makes by hand wherever they ran `keytool`.
+*.jks
+*.keystore
+
+# MacOS
+.DS_Store
+
+# Unleashed projects
+.system/
+
+# Other projects
+.sources/
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.atom/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+/dist/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# flipengine: local-only nested repo (github.com/apfxtech/flipper-engine), not part of qUnleashed.
+/lib/modules/cpp/flipengine/
+
+# wiki: clone of github.com/DarkFlippers/qUnleashed.wiki.git, its own repository.
+/wiki/
+
+# l10n: generated from translations/*.arb by flutter gen-l10n on every build.
+/lib/services/localization/gen/
+
+# Firebase configuration is restored from GitHub Secrets in CI.
+/lib/services/notifications/firebase_options.dart
+/android/app/google-services.json
+/ios/Runner/GoogleService-Info.plist
+/macos/Runner/GoogleService-Info.plist
+
+# The CocoaPods lock files. Committing them is the usual advice and it does not
+# work here: nothing in this project can regenerate them except a release run.
+# Both build scripts refuse a non-Darwin host, no job on a pull request builds
+# iOS or macOS, and CocoaPods is a macOS-only toolchain in practice - so the
+# moment a plugin bump moves a pod constraint, the committed snapshot is wrong
+# and `pod install` refuses to reconcile it. That is not hypothetical: #492
+# moved firebase_core 4.11.0 -> 4.15.2, whose podspec asks for
+# `Firebase/CoreOnly ~> 12.19.3` while the snapshot pinned `= 12.15.0`, and
+# every dev build since failed on it - a plain `pod install` keeps a locked
+# version for a transitive pod even when the development pod above it changed,
+# which is what CocoaPods means by "you should run `pod update`".
+#
+# What is lost is narrow. `pubspec.lock` still pins every plugin to an exact
+# version, and each plugin's podspec pins the pods it needs, so what floats is
+# only a third-party pod's patch range inside a `~>` it already declared.
+# What is gained is a release that does not break on every plugin bump.
+#
+# The release job uploads the pair it resolved as `podfile-locks`, so this is
+# reversible from real files rather than from a guess: commit that pair and
+# drop these two lines.
+/ios/Podfile.lock
+/macos/Podfile.lock
+
+# The native crash database, which sentry-native writes beside the executable
+# unless told otherwise - so a `flutter run` from here creates it in the repo
+# root. It holds an installation id and any crash not yet sent. Ignored as well
+# as redirected (see Telemetry._nativeDatabasePath), because the default
+# applies to any build made before that landed.
+/.sentry-native/
+
+# Local build defines, which may hold QU_CARTO_KEY and QU_BUILD_SERVER_KEY.
+# See docs/releasing.md. Every name but the template, because those are real
+# secrets and the filename is a free choice.
+#
+# test/local_defines_test.dart is the other half: an ignore rule does nothing
+# against `git add -f`.
+/dart-defines*.json
+!/dart-defines.local.example.json
+
+# faaccrack: the engine ships obfuscated (lib/modules/cpp/faaccrack/faaccrack.c
+# is generated). Its readable source and the generator must never be committed -
+# see lib/modules/cpp/faaccrack/BUILD_NOTES.md for where they live.
+faaccrack.orig.c
+cobf.py
+verify_obf.sh

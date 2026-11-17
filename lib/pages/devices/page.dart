@@ -1,0 +1,314 @@
+import 'package:flutter/material.dart';
+import 'package:pasteboard/pasteboard.dart';
+
+import '../../services/localization/l10n.dart';
+import '../../components/navigation.dart';
+import '../../theme/theme.dart';
+import 'widgets/info_line.dart';
+import '../../components/notification.dart';
+import 'widgets/page_card.dart';
+import 'device_scope.dart';
+import 'firmware/repository.dart';
+import 'models/connection_state.dart';
+import '../../services/connection/link_service.dart';
+import 'widgets/cards/auto_connect_hint.dart';
+import 'widgets/cards/battery_card.dart';
+import 'widgets/cards/connect_card.dart';
+import 'widgets/cards/device_actions_row.dart';
+import 'widgets/cards/device_info_card.dart';
+import 'widgets/cards/network_card.dart';
+import 'widgets/cards/storage_card.dart';
+import 'widgets/firmware_card.dart';
+import 'widgets/full_info_sheet.dart';
+import 'widgets/page_header.dart';
+
+class DeviceTab extends StatelessWidget {
+  const DeviceTab({super.key});
+
+  static const double _contentMaxWidth = 1120;
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = DeviceScope.of(context);
+    final topInset = MediaQuery.paddingOf(context).top;
+    final wide = MediaQuery.sizeOf(context).width >= 560;
+    final state = ctrl.connectionState;
+    final inDfu =
+        state == DeviceConnectionState.dfu ||
+        state == DeviceConnectionState.recovering;
+
+    // **A column, and the header has no height of its own.** This was a
+    // `Stack` with the header floating over a full-height list, which meant
+    // the page had to tell the header how tall it was: a constant 114, the
+    // mockup's 7+100+7, with nothing in it for the text beside the mockup. A
+    // wrapped title or one more run of hero metadata spilled out of that, and
+    // `Flex.clipBehavior` being `Clip.none`, release painted the surplus over
+    // the list rather than clipping it and reported nothing.
+    //
+    // Scaling that constant by the text scaler was the first fix tried here,
+    // and it is a guess twice over: `TextScaler.scale` is defined for font
+    // sizes rather than box heights, and the hero's metadata is a `Wrap`
+    // whose height steps when a run breaks, which nothing proportional can
+    // track.
+    //
+    // A column needs no number. The header sizes to its content, the list
+    // takes what is left, and all three readers of the old height - the
+    // header's own `height`, the list's top padding and the indicator's
+    // `edgeOffset` - go with it. The header is opaque, so nothing was being
+    // seen through it; what changes is that an overscroll shows at the list's
+    // own top edge rather than behind the header, and a translucent header
+    // would want the `Stack` back. #411.
+    return Column(
+      children: [
+        DevicePageHeader(
+          topInset: topInset,
+          title: ctrl.deviceName,
+          subtitle: 'Flipper Zero', // !!! тип устройства под именем — не менять
+          active: ctrl.isConnected || inDfu,
+          dfu: inDfu,
+          infoEntries: wide ? ctrl.deviceInfoEntries : const [],
+          deviceInfo: ctrl.info,
+          connectionLabel: ctrl.device?.isBle == true ? 'BLE' : 'USB',
+          connectionIcon: ctrl.device?.isBle == true
+              ? Icons.bluetooth
+              : Icons.usb,
+          onOpenFullInfo: ctrl.isConnected
+              ? () => _openFullInfo(context)
+              : null,
+        ),
+        Expanded(
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context)
+                .copyWith(scrollbars: false),
+            child: RefreshIndicator(
+              onRefresh: () => _onRefresh(context),
+              displacement: 28,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: 14, bottom: 14),
+                children: [
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: _contentMaxWidth,
+                      ),
+                      child: Column(
+                        children: [
+                          // Above everything, and in every state: the sharp
+                          // case is the app already holding two links and a
+                          // third Flipper being plugged in, where the page
+                          // otherwise looks entirely connected. #120.
+                          AutoConnectHintCard(links: LinkService.instance),
+                          // Always in tree — preserves carousel state across
+                          // connect/disconnect without rebuilding.
+                          FirmwareCard(
+                            deviceVersion: ctrl.firmwareVersion,
+                            deviceInfo: ctrl.info,
+                          ),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            child: _stateContent(ctrl.connectionState, wide),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static Widget _stateContent(DeviceConnectionState state, bool wide) {
+    switch (state) {
+      case DeviceConnectionState.connected:
+        return _ConnectedContent(key: const ValueKey('connected'), wide: wide);
+      case DeviceConnectionState.dfu:
+      case DeviceConnectionState.recovering:
+        return const SizedBox.shrink(key: ValueKey('recovery'));
+      case DeviceConnectionState.disconnected:
+      case DeviceConnectionState.connecting:
+        return const _DisconnectedContent(key: ValueKey('disconnected'));
+    }
+  }
+
+  static Future<void> _onRefresh(BuildContext context) async {
+    // `notifierOf`: a callback calling a method wants the controller, not a
+    // subscription - and a listening read here would outlive the tap, since
+    // nothing clears a dependency on a rebuild. #407.
+    DeviceScope.notifierOf(context).synchronize();
+    await FirmwareRepository.instance.refresh();
+  }
+
+  static void _openFullInfo(BuildContext context) {
+    // Takes **one snapshot** of the controller's state - `deviceInfoEntries`
+    // several times and `info` once, all in this call - to fill a sheet that
+    // is pushed and then static, so there is nothing for a later notification
+    // to update.
+    //
+    // This is the awkward site for `notifierOf`'s rule, and the one the
+    // syntactic guard cannot see either way, because the reads go through a
+    // local. What justifies it is the shape, not Flutter's wording about a
+    // value "used once and not cached": the derived values are baked into a
+    // pushed route, which that wording does not cover. The census budget in
+    // `test/device_scope_listen_test.dart` carries the justification. #407.
+    final ctrl = DeviceScope.notifierOf(context);
+    showDeviceFullInfoSheet(
+      context,
+      title: context.l10n.deviceFullInfo,
+      cards: [
+        FlipperPageCard(
+          title: context.l10n.deviceFirmwareTab,
+          child: Column(
+            children: [
+              for (var i = 0; i < ctrl.deviceInfoEntries.length; i++) ...[
+                FlipperInfoLine(
+                  label: ctrl.deviceInfoEntries[i].key,
+                  value: ctrl.deviceInfoEntries[i].value,
+                ),
+                if (i != ctrl.deviceInfoEntries.length - 1)
+                  Divider(height: 1, color: context.appColors.divider),
+              ],
+            ],
+          ),
+        ),
+        RawInfoCard(entries: ctrl.info),
+      ],
+    );
+  }
+}
+
+// ── Connected content ─────────────────────────────────────────────────────────
+
+class _ConnectedContent extends StatelessWidget {
+  const _ConnectedContent({super.key, required this.wide});
+
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final ctrl = DeviceScope.of(context);
+
+    return Column(
+      children: [
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: _ResponsiveCardGrid(
+            children: [
+              BatterySummaryCard(deviceInfo: ctrl.info),
+              StorageSummaryCard(deviceInfo: ctrl.info),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14),
+          child: NetworkSummaryCard(),
+        ),
+        if (!wide) ...[
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: DeviceInfoCard(
+              entries: ctrl.deviceInfoEntries,
+              onOpenFullInfo: () => DeviceTab._openFullInfo(context),
+              onExport: () => _exportDeviceInfo(context),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: DeviceActionsRow(
+            onRemoteControl: () => openRoute(context, AppRoute.remoteControl),
+            onPlayAlert: ctrl.alertPlaying ? null : () => _playAlert(context),
+            onReboot: () => ctrl.reboot(),
+          ),
+        ),
+        const SizedBox(height: 14),
+        ConnectCard(links: LinkService.instance),
+        const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  static Future<void> _playAlert(BuildContext context) async {
+    final ctrl = DeviceScope.notifierOf(context);
+    final success = await ctrl.playAlert();
+    if (!context.mounted) return;
+    context.showNotification(
+      success ? context.l10n.deviceAlertSent : context.l10n.deviceAlertFailed,
+      type: success ? QNotificationType.good : QNotificationType.error,
+    );
+  }
+
+  static Future<void> _exportDeviceInfo(BuildContext context) async {
+    final ctrl = DeviceScope.notifierOf(context);
+    Pasteboard.writeText(ctrl.buildExportDump());
+    if (!context.mounted) return;
+    context.showNotification(
+      context.l10n.deviceInfoCopied,
+      type: QNotificationType.good,
+    );
+  }
+}
+
+// ── Disconnected content ──────────────────────────────────────────────────────
+
+class _DisconnectedContent extends StatelessWidget {
+  const _DisconnectedContent({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const SizedBox(height: 14),
+        ConnectCard(links: LinkService.instance),
+      ],
+    );
+  }
+}
+
+class _ResponsiveCardGrid extends StatelessWidget {
+  const _ResponsiveCardGrid({required this.children});
+
+  final List<Widget> children;
+  static const double _spacing = 14;
+  static const double _minCardWidth = 300;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = (constraints.maxWidth / _minCardWidth).floor().clamp(
+          1,
+          children.length,
+        );
+        final cardWidth =
+            (constraints.maxWidth - (_spacing * (columns - 1))) / columns;
+        if (columns == 1) {
+          return Column(
+            children: [
+              for (var i = 0; i < children.length; i++) ...[
+                SizedBox(width: double.infinity, child: children[i]),
+                if (i != children.length - 1) const SizedBox(height: _spacing),
+              ],
+            ],
+          );
+        }
+        return Wrap(
+          spacing: _spacing,
+          runSpacing: _spacing,
+          children: [
+            for (final child in children)
+              SizedBox(width: cardWidth, child: child),
+          ],
+        );
+      },
+    );
+  }
+}

@@ -1,0 +1,189 @@
+# CLAUDE.md — qUnleashed
+
+A Flutter companion app for Flipper Zero: talks to the device over BLE **and**
+USB/serial, browses and edits its files, installs firmware and apps. Ships on
+Android, iOS and four desktop targets.
+
+Architecture decisions live in [`docs/adr/`](docs/adr/). What the codebase
+looks like today is described in [`docs/architecture.md`](docs/architecture.md).
+
+## Commands
+
+```bash
+flutter run                              # Flutter 3.47.1 / Dart 3.13.1, pinned
+flutter test
+flutter analyze                          # infos and warnings are fatal in CI
+.github/scripts/check_format.sh --write  # NOT `dart format .` — see below
+```
+
+The format gate takes its file list from `git ls-files`, because `dart format`
+does not read the analyzer's exclude list. Running `dart format .` reformats
+generated protobuf and the platform folders, which CI then rejects.
+
+There is **no `build_runner`** and no generation step to run by hand. Two
+steps generate from data inside the build: `flutter gen-l10n` compiles
+`translations/*.arb` into `lib/services/localization/gen/`, and Gradle's
+`generateWidgetStrings` runs `tool/widget_strings.dart` over those same files
+to write the home-screen widget's Android string resources, which cannot be
+Flutter strings - that file says why.
+
+Two generated files are gitignored and have to exist before the code
+compiles: `lib/services/notifications/firebase_options.dart`, for which
+`.github/scripts/stub_firebase_config.sh` writes a placeholder on a checkout
+without secrets, and `lib/modules/cpp/faaccrack/faaccrack.c`, which is
+generated outside this repository and must never be committed.
+
+**The version is not yours to pick.** `pubspec.yaml` holds the version being
+built *toward*, every push to `main` publishes a dev build from it, and CI
+refuses a build whose version has already been released or whose tag disagrees
+with pubspec. [`docs/releasing.md`](docs/releasing.md) is the runbook and
+[0014](docs/adr/0014-build-identity.md) the decision; do not bump the version
+or cut a tag without reading the first one.
+
+Submodules (`lib/modules/flipperlib`, `lib/modules/dartufbt`) are separate
+repositories in the same organisation. A change there is a PR in that
+repository plus a submodule bump here.
+
+## Stack
+
+| Area | Decision | ADR |
+|---|---|---|
+| State | `ChangeNotifier` + `setState`. No state-management package | [0001](docs/adr/0001-state-management.md) |
+| DI | Constructor parameters for new code; no container | [0002](docs/adr/0002-dependencies-are-passed-in.md) |
+| Routing | `AppRoute` registry across features, `Navigator` within one | [0006](docs/adr/0006-navigation.md) |
+| Layers | No repository layer. UI may import `flipperlib` | [0007](docs/adr/0007-no-repository-layer.md) |
+| Errors | Exceptions. No result types, no sealed failure hierarchies | [0008](docs/adr/0008-swallowed-errors.md) |
+| JSON | Hand-written, tolerant, one shared mechanism | [0005](docs/adr/0005-tolerant-decoding.md) |
+| Rules | Ratchet tests on `analyzer`, not lint plugins | [0004](docs/adr/0004-ratchet-not-lint.md) |
+
+## Target patterns vs legacy
+
+> New code follows the target patterns (see the ADRs). Legacy code is not
+> rewritten without a task of its own.
+> **Do not copy a pattern from a neighbouring file if it is listed below.**
+
+Legacy, kept deliberately, not to be imitated:
+
+- **`static final X instance` singletons, and `FlipperOneClient()`.** New code
+  takes dependencies as parameters instead. The scoreboard is
+  `test/client_reach_budget_test.dart`, which counts `FlipperOneClient()` per
+  area in `lib/` and fails when one rises.
+  [0002](docs/adr/0002-dependencies-are-passed-in.md),
+  [0012](docs/adr/0012-the-di-scoreboard-is-the-ratchet.md)
+- **All-or-nothing `fromJson`** — a decoder that throws on the first bad field.
+  Feed decoding reads entry by entry and names what it skipped.
+  [0005](docs/adr/0005-tolerant-decoding.md)
+- **Sentinel values for absence** — `sha256: ''`, `timestamp: 0`. Absence is
+  `null`. [0009](docs/adr/0009-absence-is-null.md)
+- **`LogService.info` as the last word on a failure.** `info` passes no
+  `KeptLevel` to `_emit` and const-folds away in release, so the failure is
+  reported nowhere at all. `caught` is the level for one worth keeping and not
+  worth alerting on. `test/log_level_budget_test.dart` ratchets the count per
+  directory.
+- **A bare `unawaited(f())`.** The future still rejects, and with no listener
+  the rejection reaches the zone — so it lands in the log as `[uncaught]` with
+  nothing saying which operation it was, and a `try` around the call site never
+  sees it. Use `guarded('[Area] what it was doing', ...)`.
+  `test/unawaited_budget_test.dart` ratchets the count per area. What is left is
+  either already handled a level down - `_chain` in the remote session is
+  `guarded`, several callees catch their own - or `openRoute`, whose only throw
+  is synchronous. #23
+
+## BLE and transport invariants
+
+This is the part where a mistake reaches a user rather than CI. Check what
+the submodule's own suite covers before relying on it to catch you — see
+[0003](docs/adr/0003-test-flipperlib-first.md) for what is being built up
+there and why it was the first thing scheduled.
+
+- **`_initCore` must never throw.** `lib/main.dart` has two entry points:
+  `main()` and `widgetMain()`, the second a headless isolate a home-screen
+  widget starts. Both await `_initCore`. A throw there is not a setting that
+  falls back — it is an app that never appears, on either path. Every call in
+  it that touches disk or a platform channel carries its own catch.
+- **Anything assembled in `_runApp` does not exist in `widgetMain()`.** Wiring
+  a dependency in the wrong place breaks a path nobody runs locally and CI does
+  not cover.
+- **`guarded()` never rejects.** Queues chain the next operation with
+  `previous.then(...)`, so a rejected future would strand everything behind it
+  for the life of the chain. Do not "improve" it to propagate. It is
+  `try`/`await` and not `Future.sync(...).catchError(...)` for a reason: a
+  `catchError` handler is checked against the future's *real* type argument,
+  and `void` being a top type means that argument is rarely what the signature
+  says — which is how it rejected silently for months (QUNLEASHED-A).
+- **Auto-reconnect is on** (`autoReconnect = true`, `reconnectSettle` 600 ms),
+  and a file upload restarts after the session is restored
+  (`client/api/storage.dart`). Code that assumes a transfer runs once is wrong.
+- **The request queue is ordered and its flags are load-bearing** — `priority`,
+  `seq`, `interleavable`, `holdsTxUntilAnswer`. Do not reorder or drop them to
+  make something simpler.
+- **`connectionStream` is a broadcast stream**, and an error on it does not end
+  it. A wait that treats the first event as "connected" is wrong; consult
+  `isConnected`.
+- **The client's API is extensions over a small core.** `appStart`,
+  `storageRead`, `appStateStream` and the rest of `client/api/*.dart` are
+  `extension ... on FlipperClient`, and an extension is resolved statically -
+  declaring one on a fake does nothing, the real body runs. Fake
+  `callRpcFrames` and `notificationStream` instead; everything above them goes
+  through those two. `test/emulate_start_test.dart` is the worked example.
+- **Connection errors are classified at the boundary**, and almost none of
+  them are typed: `classifyConnectError` → `FlipperConnectErrorKind`, consumed
+  by an exhaustive `switch`. It matches substrings from platform BLE stacks, so
+  a sealed hierarchy is impossible here. The exception is this library's own
+  throw — `FlipperServicesMissingError` is read by type before any string, with
+  its sentence kept as the fallback, because re-parsing a message flipperlib
+  wrote one frame earlier is not boundary classification.
+  [0008](docs/adr/0008-swallowed-errors.md)
+
+## Definition of Done
+
+Before saying a change is finished:
+
+1. `.github/scripts/check_format.sh` — no differences.
+2. `flutter analyze` — no new problems. Infos and warnings are fatal in CI.
+3. `flutter test` — green.
+4. UI changes: checked on Android **and** iOS, or say explicitly that they were
+   not.
+5. If the change touches a submodule, its own CI must be green too, and the
+   submodule bump is a separate commit here.
+
+Claims about test or analyzer state are made after running them, not from
+memory. Report failures with the output.
+
+## Anti-patterns
+
+Each of these has already shipped a bug in this repository.
+
+- **I/O in `build` or `didUpdateWidget`.** `DeviceScope` rebuilds on a
+  five-second battery poll, so a fetch there ran 12 times a minute forever
+  against a server that was not answering (#135/#136). Fetch from a listener
+  with a guard.
+- **A bare `catch (_) {}` on a path where the UI is waiting.** Three firmware
+  surfaces latched "Checking…" until the app restarted, each behind a catch
+  that recorded nothing in any build (#118/#134). Best-effort catches — `mkdir`
+  of an existing directory, temp-file cleanup — are fine and stay.
+- **Deleting a counted `LogService.info` to make the ratchet go green.** That
+  lowers the number by making the code worse; the ratchet's own comment says
+  so.
+- **Asserting on a log line's count when `LogService` can coalesce it.**
+  `_isNewLine` drops a *consecutive* identical body, so `hasLength(1)` cannot
+  tell "said once" from "said twice". This has produced a test that passed for
+  the wrong reason more than once. It cuts the other way too: the fold is a
+  static that nothing resets by itself, so a test logging a body an earlier
+  test already logged sees **no** sink call and reads as broken wiring.
+  `test/flutter_test_config.dart` resets it before every test.
+- **Trusting that a test fails for the reason its name says.** In this
+  codebase, four separate tests have passed on a mechanism other than the one
+  they claimed. Mutation runs caught all four; reading caught none.
+
+## Official Flutter guidance that applies
+
+The [official architecture guide](https://docs.flutter.dev/app-architecture) is
+the neutral reference, and its case study uses `ChangeNotifier` — the same
+choice made here. Where it recommends a ViewModel per View, this project
+diverges deliberately ([0007](docs/adr/0007-no-repository-layer.md)); the rest
+of its advice on separating UI from data applies.
+
+Do not propose Riverpod, `go_router`, `freezed` or `json_serializable` without
+reading the ADR that rejected it first. Each was considered with this
+codebase's evidence, and each rejection names what would change the answer.

@@ -1,0 +1,527 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+import '../services/logging.dart';
+import '../theme/theme.dart';
+
+/// Forgets which icon failures have been recorded, for the test suite.
+///
+/// `_RasterIconCache._recorded` bounds a failed rasterize to one record per
+/// asset and size, and nothing in the app ever clears it - deliberately, since
+/// evicting would let a permanently broken icon start logging again. That makes
+/// it process-wide state with no owner, which is the shape
+/// `test/flutter_test_config.dart` resets before every test: without it, the
+/// first test to fail an icon silences every later test for that asset, and the
+/// silence looks exactly like a `_record` that was never wired up.
+///
+/// Top-level because the cache is private; a `@visibleForTesting` member on it
+/// would not be reachable from the suite. #441.
+@visibleForTesting
+void debugForgetRecordedIconFailures() =>
+    _RasterIconCache.instance._forgetRecorded();
+
+class _RasterIconCache {
+  _RasterIconCache._();
+  static final _RasterIconCache instance = _RasterIconCache._();
+
+  static const int _maxEntries = 256;
+
+  final Map<String, ui.Image> _ready = <String, ui.Image>{};
+  final Map<String, Future<ui.Image>> _pending = <String, Future<ui.Image>>{};
+
+  /// What has already been recorded, as `asset|pixelSize`, so each is said once.
+  ///
+  /// The record has to be bounded somewhere other than the call site. A failure
+  /// is re-asked by every later [_QIconState] carrying that key - `_ready`
+  /// never gets the key and the `finally` below drops it from `_pending` - so
+  /// nothing stops the next widget trying again, and a line at the widget would
+  /// be one line per icon per rebuild. They would not fold either:
+  /// [LogService] folds only a *consecutive* identical body, and each line
+  /// names its own asset, so sixteen icons on a cold start are sixteen distinct
+  /// bodies, re-emitted on every navigation and every list recycle. ADR 0013 §5
+  /// is why that disqualifies it rather than merely being untidy - one looping
+  /// site became 94% of a release's volume and client-discarded two of every
+  /// three real errors.
+  ///
+  /// Keyed on the asset and the size rather than on the cache key, which also
+  /// carries the colour: a missing asset is the same news in every tint, so a
+  /// theme flip should not say it again. For an XBM the label is
+  /// `fap:$cacheKey`, so byte-variants of one FAP icon collapse together,
+  /// which is the same intent.
+  ///
+  /// Unbounded on purpose, unlike [_ready]: this holds strings and not images,
+  /// so it is tens of bytes an entry against `pixelSize²×4`, and evicting
+  /// would let a permanently broken icon start logging again - the volume this
+  /// exists to stop.
+  final Set<String> _recorded = <String>{};
+
+  static String keyFor(String asset, Color color, int pixelSize) =>
+      '$asset|${color.toARGB32()}|$pixelSize';
+
+  static String xbmKeyFor(
+    String cacheKey,
+    Uint8List bytes,
+    int width,
+    int height,
+    Color color,
+    int pixelSize,
+  ) =>
+      'xbm:$cacheKey|${Object.hashAll(bytes)}|${width}x$height|'
+      '${color.toARGB32()}|$pixelSize';
+
+  ui.Image? ready(String key) => _ready[key];
+
+  void _forgetRecorded() => _recorded.clear();
+
+  Future<ui.Image> resolve({
+    required String key,
+    required String label,
+    required int pixelSize,
+    required Future<ui.Image> Function() rasterize,
+  }) {
+    final existing = _ready[key];
+    if (existing != null) return Future<ui.Image>.value(existing);
+
+    var wasAdded = false;
+    final pending = _pending.putIfAbsent(key, () async {
+      wasAdded = true;
+      try {
+        final image = await rasterize();
+        _store(key, image);
+        return image;
+      } catch (error, stack) {
+        _debugLog('failed', label: label, pixelSize: pixelSize, error: error);
+        _record(label: label, pixelSize: pixelSize, error: error, stack: stack);
+        rethrow;
+      } finally {
+        // Not an operation: remove() hands back this very future, so
+        // awaiting it here could not return. It is reached only through
+        // rasterize(), whose two targets are both async, so nothing throws
+        // before putIfAbsent has stored the entry this removes.
+        unawaited(_pending.remove(key));
+        _debugLog('finished', label: label, pixelSize: pixelSize);
+      }
+    });
+
+    _debugLog(
+      wasAdded ? 'queued' : 'joined',
+      label: label,
+      pixelSize: pixelSize,
+    );
+    return pending;
+  }
+
+  /// Keeps a rasterize that failed, at the level its cause earns, once per key.
+  ///
+  /// Two causes arrive here and they are not the same news.
+  ///
+  /// An asset the bundle does not hold, or an SVG it cannot parse, is a
+  /// packaging defect: deterministic, permanent, every user, and somebody owns
+  /// it. That is a [LogService.warn] - the level that alerts - because before
+  /// #441 it was a crash report, which is the wrong *form* for it but did get
+  /// somebody's attention. Dropping it to a level nothing alerts on would have
+  /// traded a loud wrong behaviour for a quiet one.
+  ///
+  /// `dart:ui` refusing a raster surface is the environment and not a defect
+  /// (QUNLEASHED-28 is a two-core machine with 4 GB), so there is nothing to
+  /// act on and nobody to alert: [LogService.caught] keeps it for whoever reads
+  /// the report afterwards. Either way the icon is already an empty box by the
+  /// time this runs, so neither level changes what the user sees.
+  ///
+  /// The discriminator is a type read and not a message match, which is what
+  /// ADR 0008 asks for wherever a type exists: the asset bundle and
+  /// `flutter_svg` throw [FlutterError], while `dart:ui`'s `_futurize` throws a
+  /// plain `Exception`.
+  void _record({
+    required String label,
+    required int pixelSize,
+    required Object error,
+    required StackTrace stack,
+  }) {
+    if (!_recorded.add('$label|$pixelSize')) return;
+    final line =
+        '[QIconCache] rasterize failed asset=$label pixelSize=$pixelSize: '
+        '${LogService.describe(error, stack)}';
+    if (error is FlutterError) {
+      LogService.warn(line);
+    } else {
+      LogService.caught(line);
+    }
+  }
+
+  void _store(String key, ui.Image image) {
+    if (_ready.length >= _maxEntries) {
+      final oldestKey = _ready.keys.first;
+      _ready.remove(oldestKey)?.dispose();
+      _debugLog('evicted');
+    }
+    _ready[key] = image;
+  }
+
+  void _debugLog(
+    String action, {
+    String? label,
+    int? pixelSize,
+    Object? error,
+  }) {
+    if (!LogService.debugOn) return;
+
+    final details = <String>[
+      'pending=${_pending.length}',
+      'cached=${_ready.length}/$_maxEntries',
+      if (label != null) 'asset=$label',
+      if (pixelSize != null) 'pixelSize=$pixelSize',
+      if (error != null) 'error=$error',
+    ];
+    LogService.info('[QIconCache] $action; ${details.join('; ')}');
+  }
+
+  static Future<ui.Image> _rasterize({
+    required String asset,
+    required Color color,
+    required int pixelSize,
+  }) async {
+    final info = await vg.loadPicture(SvgAssetLoader(asset), null);
+    try {
+      final src = info.size;
+      final scale = (src.width <= 0 || src.height <= 0)
+          ? 1.0
+          : pixelSize / (src.width > src.height ? src.width : src.height);
+      final dx = (pixelSize - src.width * scale) / 2;
+      final dy = (pixelSize - src.height * scale) / 2;
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      final paint = Paint()
+        ..colorFilter = ui.ColorFilter.mode(color, ui.BlendMode.srcIn);
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, pixelSize.toDouble(), pixelSize.toDouble()),
+        paint,
+      );
+      canvas.translate(dx, dy);
+      canvas.scale(scale);
+      canvas.drawPicture(info.picture);
+      canvas.restore();
+
+      final picture = recorder.endRecording();
+      try {
+        return await picture.toImage(pixelSize, pixelSize);
+      } finally {
+        picture.dispose();
+      }
+    } finally {
+      info.picture.dispose();
+    }
+  }
+
+  static Future<ui.Image> rasterizeXbm({
+    required Uint8List bytes,
+    required int width,
+    required int height,
+    required Color color,
+    required int pixelSize,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final scale = pixelSize / (width > height ? width : height);
+    final dx = (pixelSize - width * scale) / 2;
+    final dy = (pixelSize - height * scale) / 2;
+    final rowBytes = (width + 7) >> 3;
+    final paint = Paint()..color = color;
+
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        final byteIndex = y * rowBytes + (x >> 3);
+        if (byteIndex >= bytes.length) continue;
+        if ((bytes[byteIndex] & (1 << (x & 7))) == 0) continue;
+        canvas.drawRect(
+          Rect.fromLTWH(dx + x * scale, dy + y * scale, scale, scale),
+          paint,
+        );
+      }
+    }
+
+    final picture = recorder.endRecording();
+    try {
+      return await picture.toImage(pixelSize, pixelSize);
+    } finally {
+      picture.dispose();
+    }
+  }
+}
+
+class QIcon extends StatefulWidget {
+  const QIcon({
+    super.key,
+    required String this.asset,
+    required this.color,
+    this.size,
+  }) : xbm = null,
+       xbmWidth = null,
+       xbmHeight = null,
+       cacheKey = null;
+
+  const QIcon.xbm({
+    super.key,
+    required Uint8List bytes,
+    required int width,
+    required int height,
+    required this.cacheKey,
+    required this.color,
+    required double this.size,
+  }) : asset = null,
+       xbm = bytes,
+       xbmWidth = width,
+       xbmHeight = height;
+
+  final String? asset;
+  final Uint8List? xbm;
+  final int? xbmWidth;
+  final int? xbmHeight;
+  final String? cacheKey;
+  final Color color;
+  final double? size;
+
+  @override
+  State<QIcon> createState() => _QIconState();
+}
+
+class _QIconState extends State<QIcon> {
+  String? _key;
+  ui.Image? _image;
+
+  void _adopt(ui.Image? cacheImage) {
+    _image?.dispose();
+    _image = cacheImage?.clone();
+  }
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    _image = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.size;
+    final asset = widget.asset;
+    final xbm = widget.xbm;
+    if (size == null) {
+      return SvgPicture.asset(
+        asset!,
+        colorFilter: ColorFilter.mode(widget.color, BlendMode.srcIn),
+      );
+    }
+
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final pixelSize = (size * dpr).ceil();
+    final key = asset != null
+        ? _RasterIconCache.keyFor(asset, widget.color, pixelSize)
+        : _RasterIconCache.xbmKeyFor(
+            widget.cacheKey!,
+            xbm!,
+            widget.xbmWidth!,
+            widget.xbmHeight!,
+            widget.color,
+            pixelSize,
+          );
+    final label = asset ?? 'fap:${widget.cacheKey}';
+
+    if (key != _key) {
+      _key = key;
+      final cached = _RasterIconCache.instance.ready(key);
+      if (cached != null) {
+        _adopt(cached);
+      } else {
+        _adopt(null);
+        // Kept inline rather than extracted into a method, and that is a
+        // deliberate reversal: `build_io_budget_test.dart` counts the async
+        // start this file makes from `build` and carries `components: 1` with
+        // the reasoning for why this one is accepted. Behind a `void` helper
+        // the visitor stops seeing it and asks for the budget to drop to 0 -
+        // a ratchet made blind by a refactor, which is the shape CLAUDE.md
+        // names for deleting a counted line to go green.
+        //
+        // **The handler absorbs and records nothing.**
+        // `_RasterIconCache._record` has already kept this failure once for
+        // the asset and size, which is a bound a line here cannot have.
+        //
+        // **Why there is a handler at all.** `resolve` rethrows so its caller
+        // decides, and this is the caller. With none, the error is forwarded
+        // to the future `then` returns, which nobody holds - so it reaches the
+        // zone, and `PlatformDispatcher.onError` files a blank icon as a fatal
+        // crash, once per QIcon that was rasterizing. On a cold start that is
+        // every icon on screen: QUNLEASHED-28 is sixteen inside one second.
+        //
+        // **Why `onError` on the derived future** and not `then`'s second
+        // argument: that argument sees a rejection from `resolve` only. A
+        // throw from the callback reaches the zone the same way, and it can
+        // throw - `_adopt` calls `ui.Image.clone()`, which raises
+        // `StateError` on an image `_store`'s eviction has disposed. One
+        // handler covers both, so the fix meets the contract it claims.
+        //
+        // **What is not settled.** #441 item 3 - what a failed icon renders,
+        // and whether the failure stays sticky for an unchanged key - is
+        // deliberately left open; this is the rejection only. `_key` is
+        // already set when the resolve starts, so this state does not ask
+        // again, and retrying from `build` is the shape #135/#136 warns
+        // about. A sentinel in the cache is what would do it safely.
+        _RasterIconCache.instance
+            .resolve(
+              key: key,
+              label: label,
+              pixelSize: pixelSize,
+              rasterize: asset != null
+                  ? () => _RasterIconCache._rasterize(
+                      asset: asset,
+                      color: widget.color,
+                      pixelSize: pixelSize,
+                    )
+                  : () => _RasterIconCache.rasterizeXbm(
+                      bytes: xbm!,
+                      width: widget.xbmWidth!,
+                      height: widget.xbmHeight!,
+                      color: widget.color,
+                      pixelSize: pixelSize,
+                    ),
+            )
+            .then((image) {
+              if (mounted && _key == key) setState(() => _adopt(image));
+            })
+            .onError<Object>((_, _) {});
+      }
+    }
+
+    final image = _image;
+    if (image == null) {
+      return SizedBox(width: size, height: size);
+    }
+    return RawImage(
+      image: image.clone(),
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+    );
+  }
+}
+
+/// Resolved colours for a tinted icon badge (a glyph on a same-colour pill).
+///
+/// This is the single source of truth for how badges look across the app, so
+/// every call site switches with the theme the same way. Light theme paints a
+/// solid [color] fill behind a white glyph; dark theme keeps the translucent
+/// same-colour tint behind a coloured glyph. A near-white [color] would vanish
+/// on the light card, so it falls back to grey.
+@immutable
+class QIconBadgeStyle {
+  const QIconBadgeStyle({required this.background, required this.foreground});
+
+  final Color background;
+  final Color foreground;
+
+  factory QIconBadgeStyle.of(
+    BuildContext context,
+    Color color, {
+    double darkOpacity = 0.18,
+  }) => QIconBadgeStyle.forColors(
+    context.appColors,
+    color,
+    darkOpacity: darkOpacity,
+  );
+
+  factory QIconBadgeStyle.forColors(
+    QAppColors colors,
+    Color color, {
+    double darkOpacity = 0.18,
+  }) {
+    if (colors.isDark) {
+      return QIconBadgeStyle(
+        background: color.withValues(alpha: darkOpacity),
+        foreground: color,
+      );
+    }
+    final isNearWhite = color.computeLuminance() > 0.9;
+    return QIconBadgeStyle(
+      background: isNearWhite ? const Color(0xFF9E9E9E) : color,
+      foreground: const Color(0xFFFFFFFF),
+    );
+  }
+}
+
+class QIconBadge extends StatelessWidget {
+  const QIconBadge({
+    super.key,
+    required this.asset,
+    required this.color,
+    this.size = 36,
+    this.iconSize = 24,
+    this.backgroundOpacity = 0.18,
+    this.borderRadius = 8,
+  }) : xbm = null,
+       xbmWidth = null,
+       xbmHeight = null,
+       cacheKey = null;
+
+  const QIconBadge.xbm({
+    super.key,
+    required Uint8List bytes,
+    required int width,
+    required int height,
+    required this.cacheKey,
+    required this.color,
+    this.size = 36,
+    this.iconSize = 24,
+    this.backgroundOpacity = 0.18,
+    this.borderRadius = 8,
+  }) : asset = null,
+       xbm = bytes,
+       xbmWidth = width,
+       xbmHeight = height;
+
+  final String? asset;
+  final Uint8List? xbm;
+  final int? xbmWidth;
+  final int? xbmHeight;
+  final String? cacheKey;
+  final Color color;
+  final double size;
+  final double iconSize;
+  final double backgroundOpacity;
+  final double borderRadius;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = QIconBadgeStyle.of(
+      context,
+      color,
+      darkOpacity: backgroundOpacity,
+    );
+    final backgroundColor = style.background;
+    final iconColor = style.foreground;
+
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(borderRadius),
+      ),
+      child: asset != null
+          ? QIcon(asset: asset!, color: iconColor, size: iconSize)
+          : QIcon.xbm(
+              bytes: xbm!,
+              width: xbmWidth!,
+              height: xbmHeight!,
+              cacheKey: cacheKey!,
+              color: iconColor,
+              size: iconSize,
+            ),
+    );
+  }
+}

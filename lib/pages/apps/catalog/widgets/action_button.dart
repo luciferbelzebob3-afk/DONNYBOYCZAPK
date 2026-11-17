@@ -1,0 +1,278 @@
+import 'package:flutter/material.dart';
+
+import '../../../../services/localization/l10n.dart';
+import '../../../../theme/theme.dart';
+import '../../../../components/notification.dart';
+import '../../../../components/progress_button.dart';
+import '../../actions.dart';
+import '../../data/catalog_state.dart';
+import '../../data/install_engine.dart';
+import '../../data/models/card.dart';
+import '../../data/models/category.dart';
+import '../../data/models/detail.dart';
+
+class AppActionButton extends StatelessWidget {
+  const AppActionButton({
+    super.key,
+    required this.engine,
+    required this.state,
+    required this.app,
+    this.category,
+    this.detail,
+    this.size = AppActionButtonSize.compact,
+  });
+
+  final InstallEngine engine;
+  final CatalogAppState state;
+  final AppCard app;
+  final AppCategory? category;
+  final AppDetail? detail;
+  final AppActionButtonSize size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final action = engine.actionFor(app);
+
+    if (action != null) {
+      return _ActionRow(
+        size: size,
+        primary: _buildProgressButton(
+          type: action.type,
+          stage: action.stage,
+          progress: action.progress,
+          cancelling: engine.isCancelling(app.alias),
+        ),
+      );
+    }
+
+    if (!engine.isReady) {
+      return _ActionRow(
+        size: size,
+        primary: _buildButton(
+          label: l10n.appActionInstall,
+          color: colors.accent,
+          onTap: () => _connectHint(context),
+        ),
+      );
+    }
+
+    switch (state) {
+      case CatalogAppState.install:
+        return _ActionRow(
+          size: size,
+          primary: _buildButton(
+            label: l10n.appActionInstall,
+            color: colors.accent,
+            onTap: _install,
+          ),
+        );
+      case CatalogAppState.update:
+        return _ActionRow(
+          size: size,
+          primary: _buildButton(
+            label: l10n.appActionUpdate,
+            color: colors.success,
+            onTap: _install,
+          ),
+          secondary: _DeleteButton(
+            size: size,
+            onTap: () => _confirmDelete(context),
+          ),
+        );
+      case CatalogAppState.open:
+        return _ActionRow(
+          size: size,
+          primary: _buildButton(
+            label: l10n.appActionOpen,
+            color: colors.accent,
+            onTap: () => _launchApp(context),
+          ),
+          secondary: _DeleteButton(
+            size: size,
+            onTap: () => _confirmDelete(context),
+          ),
+        );
+    }
+  }
+
+  Widget _buildProgressButton({
+    required AppActionType type,
+    required AppActionStage stage,
+    required double progress,
+    required bool cancelling,
+  }) {
+    final progressState = _ProgressState.resolve(type, stage, cancelling);
+    final isLarge = size == AppActionButtonSize.large;
+    final indeterminate =
+        cancelling ||
+        stage == AppActionStage.queued ||
+        stage == AppActionStage.check ||
+        stage == AppActionStage.build ||
+        type == AppActionType.delete;
+    return ProgressButton(
+      text: progressState.label,
+      color: progressState.color,
+      onPressed: cancelling ? null : () => engine.cancel(app.alias),
+      progress: indeterminate ? null : progress,
+      indeterminate: indeterminate,
+      showPercent: !indeterminate,
+      height: isLarge ? 48 : 32,
+      borderRadius: isLarge ? 10 : 8,
+      horizontalPadding: isLarge ? 12 : 8,
+      textStyle: ProgressButton.defaultTextStyle.copyWith(
+        fontSize: isLarge ? 40 : 20,
+      ),
+    );
+  }
+
+  Widget _buildButton({
+    required String label,
+    required Color color,
+    VoidCallback? onTap,
+  }) {
+    final isLarge = size == AppActionButtonSize.large;
+    return ProgressButton(
+      text: label,
+      color: color,
+      onPressed: onTap,
+      height: isLarge ? 48 : 32,
+      borderRadius: isLarge ? 10 : 8,
+      horizontalPadding: isLarge ? 24 : 12,
+      textStyle: ProgressButton.defaultTextStyle.copyWith(
+        fontSize: isLarge ? 40 : 20,
+      ),
+    );
+  }
+
+  void _connectHint(BuildContext context) {
+    context.showNotification(
+      context.l10n.catalogConnectToInstall,
+      type: QNotificationType.warning,
+    );
+  }
+
+  void _install() {
+    engine.installOrUpdate(app, category: category, detail: detail);
+  }
+
+  Future<void> _launchApp(BuildContext context) => launchApp(
+    context,
+    () => engine.launch(app, category: category),
+    // The *path*, resolved the way the engine resolves it, because the app
+    // manager and the installer key on a path too: keyed on the alias here,
+    // the same app launched from the catalog and from the manager passed both
+    // guards and still gave two screen streams. The alias is the fallback for
+    // an app with no installed manifest, which cannot be launched anyway.
+    target: engine.manifests.byAlias(app.alias)?.path ?? app.alias,
+  );
+
+  Future<void> _confirmDelete(BuildContext context) =>
+      confirmDeleteApp(context, engine: engine, app: app, category: category);
+}
+
+enum AppActionButtonSize { compact, large }
+
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({required this.size, required this.primary, this.secondary});
+
+  final AppActionButtonSize size;
+  final Widget primary;
+  final Widget? secondary;
+
+  @override
+  Widget build(BuildContext context) {
+    final isLarge = size == AppActionButtonSize.large;
+    if (secondary == null) {
+      if (isLarge) return primary;
+      return SizedBox(width: 92, child: primary);
+    }
+    return Row(
+      mainAxisSize: isLarge ? MainAxisSize.max : MainAxisSize.min,
+      children: [
+        if (isLarge)
+          Expanded(child: primary)
+        else
+          SizedBox(width: 92, child: primary),
+        SizedBox(width: isLarge ? 12 : 8),
+        secondary!,
+      ],
+    );
+  }
+}
+
+class _DeleteButton extends StatelessWidget {
+  const _DeleteButton({required this.onTap, required this.size});
+
+  final VoidCallback onTap;
+  final AppActionButtonSize size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final isLarge = size == AppActionButtonSize.large;
+    final dim = isLarge ? 46.0 : 34.0;
+    final radius = BorderRadius.circular(isLarge ? 10 : 8);
+
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: colors.divider, width: 1.25),
+        borderRadius: radius,
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: radius,
+        child: SizedBox(
+          width: dim,
+          height: dim,
+          child: Icon(
+            Icons.delete_outline,
+            color: colors.danger,
+            size: isLarge ? 22 : 18,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProgressState {
+  const _ProgressState({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  static _ProgressState resolve(
+    AppActionType type,
+    AppActionStage stage,
+    bool cancelling,
+  ) {
+    final color = switch (type) {
+      AppActionType.update => FlipperOriginalColors.green,
+      AppActionType.delete => FlipperOriginalColors.danger,
+      AppActionType.install => FlipperOriginalColors.accent,
+    };
+    if (cancelling) {
+      return _ProgressState(label: l10n.appActionCancel, color: color);
+    }
+    if (stage == AppActionStage.queued) {
+      return _ProgressState(label: l10n.appActionQueued, color: color);
+    }
+    if (stage == AppActionStage.check) {
+      return _ProgressState(label: l10n.appActionCheck, color: color);
+    }
+    if (stage == AppActionStage.build) {
+      return _ProgressState(label: l10n.appActionBuild, color: color);
+    }
+    if (type == AppActionType.delete) {
+      return _ProgressState(label: l10n.appActionDelete, color: color);
+    }
+    return _ProgressState(
+      label: stage == AppActionStage.upload
+          ? l10n.appActionUpload
+          : l10n.appActionDownload,
+      color: color,
+    );
+  }
+}

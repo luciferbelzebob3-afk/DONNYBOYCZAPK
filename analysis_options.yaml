@@ -1,0 +1,32 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - lib/modules/flipperlib/lib/src/proto/generated/**
+    # Another package's tests, with their own dev dependencies. The app
+    # never resolves those, so analysing them here reports every matcher
+    # as undefined.
+    - lib/modules/*/test/**
+    - lib/modules/extensions/**
+    - lib/modules/irondash/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+
+linter:
+  rules:
+    # A Future-returning statement in an async body with no unawaited()
+    # around it: either it should have been awaited, or saying so is free.
+    # Both submodules already ship under this rule.
+    #
+    # It cannot see an unawaited() call that carries no error handler, since
+    # that is the escape hatch it documents - and enabling it adds such calls,
+    # so it grows the backlog #23 tracks even while stopping that backlog
+    # gaining a new shape. Converging those handlers is the other half, and
+    # #23 holds it along with what discarded_futures flags in non-async
+    # bodies.
+    - unawaited_futures

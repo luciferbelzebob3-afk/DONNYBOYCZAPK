@@ -1,0 +1,108 @@
+name: Set up Flutter
+description: >
+  Installs the pinned Flutter SDK, settles the Swift Package Manager setting and
+  fetches dependencies. Run it after actions/checkout: a local composite action
+  lives in the repository, so the repository has to be on disk before this can be
+  resolved. Note that the SPM setting is written to the runner's global Flutter
+  config and persists for the rest of the job.
+
+inputs:
+  flutter-version:
+    description: >
+      Flutter SDK version to install. Every job in this repository builds on the
+      same default. Bumping it means regenerating pubspec.lock in the same
+      commit: flutter_test pins matcher, test_api, vector_math and meta to exact
+      versions that move with the SDK, and --enforce-lockfile below turns any
+      mismatch into a red build on every job at once. For the same reason an
+      override to trial a different SDK fails here rather than building.
+    required: false
+    default: "3.47.1"
+  pub-get:
+    description: >
+      Set to "false" to install the SDK without fetching dependencies, and to
+      skip the translation preflight with it. Only the Crowdin sync does, and
+      crowdin-rx.yml says why where it does it.
+    required: false
+    default: "true"
+  swift-package-manager:
+    description: >
+      Set to "false" on any job that builds for macOS or iOS. pubspec.yaml now
+      carries the same setting for the project, so this is belt and braces at
+      the runner level until one macOS release confirms the project key holds.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ inputs.flutter-version }}
+        channel: stable
+        cache: true
+
+    # Always runs and always reports, so a mistyped input cannot leave a macOS
+    # build silently on SPM - the failure it would cause surfaces far from here,
+    # in a release pipeline whose publish path only runs on a tag.
+    - name: Configure Swift Package Manager
+      shell: bash
+      env:
+        SPM: ${{ inputs.swift-package-manager }}
+      run: |
+        case "$SPM" in
+          true)  flutter config --enable-swift-package-manager ;;
+          false) flutter config --no-enable-swift-package-manager ;;
+          *)
+            echo "::error::swift-package-manager must be 'true' or 'false', got '$SPM'."
+            exit 1
+            ;;
+        esac
+
+    # --enforce-lockfile installs exactly the hosted versions pubspec.lock
+    # records instead of re-resolving. Without it CI tested, and a release
+    # shipped, a dependency set nobody had committed: main's lockfile was
+    # resolved against Flutter 3.44.0 while this action pins 3.47.1, so every
+    # run silently re-resolved five packages. It also stopped the pub cache
+    # persisting them - the key is the committed lockfile, so it hit, and a hit
+    # suppresses the post-job save.
+    #
+    # It does not cover the two path dependencies: lib/modules/flipperlib and
+    # lib/modules/dartufbt record a version string and no hash, so a submodule
+    # whose code moved still satisfies the lockfile. What pins those is the
+    # gitlink plus `submodules: recursive` on every checkout.
+    #
+    # The preflight, before the command it is a preflight for. `pub get`
+    # compiles the translations, so a translation that does not compile fails
+    # it - and for one shape, an `@@locale` that contradicts its own filename,
+    # gen-l10n names no file at all. This names it, and it needs nothing but
+    # the checkout. Its header has the rest, including why it is here rather
+    # than in ci.yml: five jobs call this action and only one of them is
+    # ci.yml's.
+    - name: Check every translation declares the locale its filename says
+      if: inputs.pub-get != 'false'
+      shell: bash
+      run: "${GITHUB_WORKSPACE}/.github/scripts/check_arb_locales.sh"
+
+    # `generate: true` makes this command compile the translations as well, so
+    # it fails for two unrelated families of reason and the lockfile is only
+    # one of them. Which it was is decided by pub_get_failure_message.sh, whose
+    # header has the run that paid for it, from the output kept here - not from
+    # the exit status, which is 1 either way.
+    #
+    # The output goes to a file and is printed afterwards rather than through
+    # `tee`: in a pipeline a `tee` that cannot write - a full disk, an
+    # unwritable RUNNER_TEMP - fails the pipeline under `pipefail`, and a
+    # successful install would then be reported as the very lockfile failure
+    # this is here to stop misreporting.
+    - name: Install Flutter dependencies
+      if: inputs.pub-get != 'false'
+      shell: bash
+      run: |
+        status=0
+        flutter pub get --enforce-lockfile > "${RUNNER_TEMP}/pub-get.txt" 2>&1 || status=$?
+        cat "${RUNNER_TEMP}/pub-get.txt"
+        ((status == 0)) && exit 0
+        "${GITHUB_WORKSPACE}/.github/scripts/pub_get_failure_message.sh" \
+          "${RUNNER_TEMP}/pub-get.txt"
+        exit 1

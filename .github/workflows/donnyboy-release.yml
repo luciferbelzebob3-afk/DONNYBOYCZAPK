@@ -66,7 +66,6 @@ jobs:
           "$apksigner" verify --verbose --print-certs "dist/DonnyBoy-$RELEASE_VERSION.apk" > dist/APK-SIGNATURE.txt
           expected=$(openssl x509 -in dist/DonnyBoy-signing-certificate.pem -outform DER | sha256sum | cut -d' ' -f1)
           grep -F "Signer #1 certificate SHA-256 digest: $expected" dist/APK-SIGNATURE.txt
-          python3 tool/donnyboy/package_plugin.py
           cd dist
           sha256sum *.apk > SHA256SUMS
       - uses: actions/upload-artifact@v4
@@ -80,7 +79,7 @@ jobs:
         run: |
           gh release create "v$RELEASE_VERSION" "dist/DonnyBoy-$RELEASE_VERSION.apk" \
             dist/SHA256SUMS dist/APK-SIGNATURE.txt dist/DonnyBoy-signing-certificate.pem \
-            dist/DonnyBoy-signing.cms dist/donnyboy-android-devkit.zip \
+            dist/DonnyBoy-signing.cms \
             --target "$(git rev-parse HEAD)" --title "DonnyBoy $RELEASE_VERSION" \
             --notes-file tool/donnyboy/release-notes.md
       - name: Odstranit docasny soukromy klic z runneru

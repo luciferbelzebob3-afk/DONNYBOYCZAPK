@@ -1,0 +1,47 @@
+name: DonnyBoy release text
+on:
+  push:
+    branches: [dev]
+    paths: ['tool/donnyboy/release-notes.md', '.github/workflows/donnyboy-release-text.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: donnyboy-release-text
+  cancel-in-progress: false
+jobs:
+  text:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upravit popis vydani
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("tool/donnyboy/release-request.json"))["version"])')
+          # The APK may still be compiling. This job changes text only.
+          ready=false
+          for attempt in $(seq 1 80); do
+            if gh release view "v$version" --json id > /dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 30
+          done
+          [[ "$ready" == true ]] || { echo 'Vydání zatím není dostupné.' >&2; exit 1; }
+          gh release edit "v$version" --notes-file tool/donnyboy/release-notes.md
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          python3 - "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/plugin-assets.txt" <<'PY'
+          import json, sys
+          for release in json.load(open(sys.argv[1])):
+              for asset in release['assets']:
+                  if asset['name'] == 'donnyboy-android-devkit.zip':
+                      print(asset['id'])
+          PY
+          while read -r asset_id; do
+            [[ -z "$asset_id" ]] || gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+          done < "$RUNNER_TEMP/plugin-assets.txt"
+          if gh release view apk-preview-4 > /dev/null 2>&1; then
+            gh release edit apk-preview-4 --notes 'Starší testovací verze DonnyBoy pro Android. Používá vývojový podpis a neobsahuje změny z verze 1.0.0. Pro běžnou instalaci stáhni aktuální oficiální vydání. NQLSH'
+          fi

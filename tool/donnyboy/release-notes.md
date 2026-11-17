@@ -1,13 +1,13 @@
-První oficiální Android APK DonnyBoy od NQLSH, s vlastním produkčním podpisem.
+První oficiální vydání DonnyBoy pro Android.
 
-- České rozhraní, čeština jako výchozí jazyk.
-- Černé pozadí, oranžové akcenty a kovové logo DONNY BOY s pixelovým maskotem místo O.
-- Ikona aplikace s klukem v kapuci, včetně adaptivních Android ikon.
-- INFO, REPO a WEB, původní autoři a licence GPL-3.0.
-- Katalog firmwaru DONNY BOY CZ a volitelné kontroly nových verzí bez placeného backendu.
+Do týhle verze jsem přidal kompletní český rozhraní, černý vzhled s oranžovejma detailama, logo DONNY BOY a ikonu našeho kluka v kapuci. Čeština je při nový instalaci nastavená rovnou.
 
-Android 10 a novější. BLE/USB a instalaci firmwaru je potřeba ověřit na fyzickém zařízení; toto vydání takový test nepotvrzuje.
+Aplikace obsahuje přístup k funkcím qUnleashed, nabídku firmwaru DONNY BOY CZ a volitelný upozornění na nový stabilní verze. Na úvodní obrazovce najdeš taky REPO, WEB a INFO.
 
-APK používá vlastní release certifikát. Preview mělo jiný vývojový podpis, proto Android při přechodu může vyžadovat jeho odinstalování (odinstalace smaže místní data aplikace).
+**Android 10 a novější.** APK má vlastní release podpis. Při přechodu ze starýho preview může Android vyžadovat jeho odinstalování kvůli jinýmu certifikátu; odinstalace smaže místní data aplikace.
 
-Soubor DonnyBoy-signing.cms obsahuje zašifrovaný podpisový balíček. Otevřít jej lze pouze soukromým obnovovacím klíčem vlastníka. Veřejný certifikát a APK-SIGNATURE.txt umožňují ověřit podpis APK. Soukromý podpisový klíč ani hesla nejsou ve zdrojovém repozitáři.
+BLE/USB a instalaci firmwaru zatím nemám ověřený na fyzickým zařízení. Chyby mi prosím napiš do Issues s modelem telefonu a verzí Androidu.
+
+K APK přikládám kontrolní součet SHA-256 a veřejnej podpisovej certifikát. DonnyBoy vychází z qUnleashed a zachovává původní autory i licenci GPL-3.0. Díky vývojářům Unleashed za jejich práci.
+
+NQLSH

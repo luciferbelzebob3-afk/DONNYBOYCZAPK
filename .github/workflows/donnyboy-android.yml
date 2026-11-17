@@ -1,8 +1,5 @@
 name: DonnyBoy Android
 on:
-  push:
-    branches: [dev]
-    paths: ['.github/workflows/donnyboy-android.yml', 'tool/donnyboy/**', 'lib/**', 'android/**', 'test/**', 'translations/**', 'pubspec.*', 'plugins/**']
   workflow_dispatch:
 permissions:
   contents: write

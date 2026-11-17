@@ -11,6 +11,12 @@ Autor úprav: **NQLSH**. Android 10 a novější. Fork [qUnleashed](https://gith
 - DONNY BOY CZ je první firmware v nabídce. GitHub Releases se převádějí do instalačního katalogu; jen f7 update TGZ s SHA-256 a očekávanou adresou.
 - Zachované funkce qUnleashed: BLE/USB, soubory, archiv, vzdálené ovládání. Funkčnost na fyzickém zařízení vyžaduje ověření.
 
+## Oficiální verze 1.0.0
+
+Nový černý vzhled s logem DONNY BOY, oranžovými akcenty a ikonou kluka v kapuci. Oficiální workflow **DonnyBoy official release** provede analýzu, testy, sestavení a ověření vlastního release podpisu. Spouští se změnou `tool/donnyboy/release-request.json` nebo ručně. Preview workflow se spouští jen ručně.
+
+Soukromý klíč se neukládá do Gitu. První oficiální běh vytvoří vlastní RSA 3072 certifikát; podpisový balíček exportuje pouze zašifrovaný veřejným obnovovacím certifikátem vlastníka. Další verze vyžadují tentýž JKS v secrets `DONNYBOY_KEYSTORE_BASE64`, `DONNYBOY_STORE_PASSWORD`, `DONNYBOY_KEY_ALIAS` a `DONNYBOY_KEY_PASSWORD`; nový klíč se automaticky nevytváří.
+
 ## Sestavení
 
 Větev `dev`. GitHub Actions: **DonnyBoy Android**. Dokončený import uložil kompletní zdrojový strom qUnleashed z pevného commitu `388331c619fabe01a19a4149d58b72d2888f722b`, včetně submodulů. Cizí workflows se neaktivují. Změny se uloží do dev bez force push. Další běhy pracují s uloženými zdroji.

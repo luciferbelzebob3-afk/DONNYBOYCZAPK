@@ -68,9 +68,10 @@ class AboutPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFF101114),
+    backgroundColor: const Color(0xFF000000),
     appBar: AppBar(
-      title: const Text('DonnyBoy'),
+      backgroundColor: Colors.black,
+      title: const Text('DonnyBoy', style: TextStyle(letterSpacing: 2)),
       actions: [
         IconButton(
           tooltip: 'Nastavení',
@@ -85,10 +86,13 @@ class AboutPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.developer_board, color: Color(0xFFFF9700), size: 88),
-            const SizedBox(height: 24),
-            const Text('DONNY BOY', textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: Color(0xFFFF9700))),
+            Image.asset(
+              'assets/img/donnyboy_logo.png',
+              height: 150,
+              fit: BoxFit.contain,
+              semanticLabel: 'DONNY BOY – pixelový kluk v kapuci místo písmene O',
+            ),
+            const SizedBox(height: 12),
             const Text('Flipper Zero • NQLSH', textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70)),
             const SizedBox(height: 32),
@@ -110,7 +114,7 @@ class AboutPage extends StatelessWidget {
                     'Firmware DONNY BOY CZ vychází z Unleashed.\n\n'
                     'Pokud se ti aplikace nebo firmware líbí, podpoř vývojáře Unleashed. '
                     'Původní autoři a licence GPL-3.0 zůstávají zachovaní.\n\n'
-                    'Verze 0.1.0 preview. Nová vydání sleduje Android na pozadí bez Firebase.',
+                    'Verze 1.0.0. Nová vydání sleduje Android na pozadí bez Firebase.',
                   )),
                   actions: [
                     TextButton(onPressed: () => _open(ctx, 'https://flipperunleashed.com/'), child: const Text('Podpořit Unleashed')),

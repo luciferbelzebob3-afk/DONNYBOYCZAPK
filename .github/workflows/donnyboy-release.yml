@@ -1,0 +1,90 @@
+name: DonnyBoy official release
+on:
+  push:
+    branches: [dev]
+    paths: ['tool/donnyboy/release-request.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: donnyboy-official-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Overit nove vydani
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("tool/donnyboy/release-request.json"))["version"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          python3 - "$version" "$RUNNER_TEMP/releases.json" <<'PY'
+          import json, sys
+          if any(r['tag_name'] == 'v' + sys.argv[1] for r in json.load(open(sys.argv[2]))):
+              raise SystemExit('Tato verze už existuje. Tag ani klíč se nepřepisuje.')
+          PY
+          python3 tool/donnyboy/bootstrap.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: ./.github/actions/setup-flutter
+      - name: Analyza a testy
+        run: |
+          flutter analyze --no-pub
+          flutter test --no-pub test/donnyboy_test.dart
+      - name: Pripravit soukromy podpis
+        env:
+          DONNYBOY_KEYSTORE_BASE64: ${{ secrets.DONNYBOY_KEYSTORE_BASE64 }}
+          DONNYBOY_STORE_PASSWORD: ${{ secrets.DONNYBOY_STORE_PASSWORD }}
+          DONNYBOY_KEY_ALIAS: ${{ secrets.DONNYBOY_KEY_ALIAS }}
+          DONNYBOY_KEY_PASSWORD: ${{ secrets.DONNYBOY_KEY_PASSWORD }}
+        run: bash tool/donnyboy/prepare_signing.sh
+      - name: Uchovat zasifrovany podpisovy balicek
+        uses: actions/upload-artifact@v4
+        with:
+          name: DonnyBoy-signing-encrypted
+          path: dist/DonnyBoy-signing.cms
+          if-no-files-found: error
+          retention-days: 90
+      - name: Sestavit podepsany release
+        run: |
+          flutter build apk --release --build-name="$RELEASE_VERSION" --build-number="100${{ github.run_number }}" \
+            --dart-define=QU_COMMIT="$(git rev-parse HEAD)" --dart-define=QU_CHANNEL=release
+      - name: Overit podpis a soucty
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/DonnyBoy-$RELEASE_VERSION.apk"
+          unzip -l "dist/DonnyBoy-$RELEASE_VERSION.apk" | grep libapp.so
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs "dist/DonnyBoy-$RELEASE_VERSION.apk" > dist/APK-SIGNATURE.txt
+          expected=$(openssl x509 -in dist/DonnyBoy-signing-certificate.pem -outform DER | sha256sum | cut -d' ' -f1)
+          grep -F "Signer #1 certificate SHA-256 digest: $expected" dist/APK-SIGNATURE.txt
+          python3 tool/donnyboy/package_plugin.py
+          cd dist
+          sha256sum *.apk > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DonnyBoy-release
+          path: dist/*
+          if-no-files-found: error
+      - name: Vydat oficialni APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$RELEASE_VERSION" "dist/DonnyBoy-$RELEASE_VERSION.apk" \
+            dist/SHA256SUMS dist/APK-SIGNATURE.txt dist/DonnyBoy-signing-certificate.pem \
+            dist/DonnyBoy-signing.cms dist/donnyboy-android-devkit.zip \
+            --target "$(git rev-parse HEAD)" --title "DonnyBoy $RELEASE_VERSION" \
+            --notes-file tool/donnyboy/release-notes.md
+      - name: Odstranit docasny soukromy klic z runneru
+        if: always()
+        run: |
+          rm -f android/key.properties
+          rm -rf "$RUNNER_TEMP/donnyboy-signing"

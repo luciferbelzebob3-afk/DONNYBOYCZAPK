@@ -33,7 +33,7 @@ class QAppThemeController extends ChangeNotifier with WidgetsBindingObserver {
 
   final FirmwareConfig _config = QAppConfig.firmware;
   FirmwareEntry _activeFirmware = QAppConfig.defaultFirmware;
-  QThemeMode _themeMode = QThemeMode.firmware;
+  QThemeMode _themeMode = QThemeMode.dark;
 
   FirmwareConfig get config => _config;
   FirmwareEntry get activeFirmware => _activeFirmware;
@@ -67,7 +67,7 @@ class QAppThemeController extends ChangeNotifier with WidgetsBindingObserver {
   bool get isDark => brightness == Brightness.dark;
 
   static bool _firmwareIsDark(FirmwareEntry firmware) =>
-      firmware.shortName.toLowerCase() == 'unlshd';
+      const {'unlshd', 'donnyboy'}.contains(firmware.shortName.toLowerCase());
 
   Future<void> loadThemeMode() async {
     final PrefsReader reader;
@@ -263,7 +263,7 @@ class QAppColors extends ThemeExtension<QAppColors> {
 
     if (isDark) {
       return QAppColors(
-        background: const Color(0xFF090909),
+        background: const Color(0xFF000000),
         card: const Color(0xFF151515),
         accent: accent,
         textPrimary: const Color(0xFFFFFFFF),
@@ -468,6 +468,25 @@ ThemeData buildAppTheme(Brightness brightness, Color accent) {
     scaffoldBackgroundColor: colors.background,
     colorScheme: colorScheme,
     dividerColor: colors.divider,
+    appBarTheme: AppBarTheme(
+      backgroundColor: colors.background,
+      foregroundColor: colors.textPrimary,
+      surfaceTintColor: Colors.transparent,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colors.textSecondary,
+        side: BorderSide(color: colors.divider),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
     dialogTheme: DialogThemeData(backgroundColor: colors.dialogBackground),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(foregroundColor: colors.accent),

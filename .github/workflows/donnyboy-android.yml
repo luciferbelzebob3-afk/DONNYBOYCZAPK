@@ -23,15 +23,6 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: ./.github/actions/setup-flutter
-      - name: Zabalit vyvojovy plugin
-        run: |
-          mkdir -p dist
-          python3 tool/donnyboy/package_plugin.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: donnyboy-android-devkit
-          path: dist/donnyboy-android-devkit.zip
-          if-no-files-found: error
       - name: Kontrola
         run: |
           flutter analyze --no-pub
@@ -55,4 +46,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="apk-preview-${{ github.run_number }}"
-          gh release create "$tag" dist/* --target "$(git rev-parse HEAD)" --prerelease --title "DonnyBoy 0.1.0 preview" --notes "Testovací release sestavený v režimu release s vývojovým podpisem. Není určený pro Google Play. Zdroj: větev dev. BLE/USB vyžaduje ověření na fyzickém zařízení. Vývojový plugin je přiložený jako ZIP."
+          gh release create "$tag" dist/* --target "$(git rev-parse HEAD)" --prerelease --title "DonnyBoy 0.1.0 preview" --notes "Testovací release sestavený v režimu release s vývojovým podpisem. Není určený pro Google Play. Zdroj: větev dev. BLE/USB vyžaduje ověření na fyzickém zařízení."

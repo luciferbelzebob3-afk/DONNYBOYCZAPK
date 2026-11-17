@@ -21,7 +21,7 @@ if importing:
     run("git", "read-tree", UPSTREAM)
     run("git", "checkout-index", "-a", "-f")
     # Never import upstream deployment, translation, or publishing automations.
-    run("git", "rm", "-r", ".github/workflows")
+    run("git", "rm", "-r", "-f", ".github/workflows")
     shutil.copyfile("README.md", "README.upstream.md")
     for p, content in saved.items():
         target = root / p

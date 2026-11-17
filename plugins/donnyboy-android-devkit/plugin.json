@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "donnyboy-android-devkit",
+  "version": "0.1.0",
+  "description": "Vývoj Android aplikace DonnyBoy pro Flipper Zero a DONNY BOY CZ.",
+  "author": {
+    "name": "NQLSH"
+  },
+  "license": "GPL-3.0",
+  "repository": "https://github.com/luciferbelzebob3-afk/DONNYBOYCZAPK"
+}

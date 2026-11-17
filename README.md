@@ -1,7 +1,37 @@
-# DonnyBoy
+# DonnyBoy pro Android
 
-Androidová aplikace pro Flipper Zero a firmware [DONNY BOY CZ](https://github.com/luciferbelzebob3-afk/DONNYBOYCZ).
+Autor úprav: **NQLSH**. Android 10 a novější. Fork [qUnleashed](https://github.com/DarkFlippers/qUnleashed), původní autoři a GPL-3.0 zůstávají zachovaní. Původní dokumentace je po importu v README.upstream.md.
 
-Autor úprav: **NQLSH**. Připravovaný fork [qUnleashed](https://github.com/DarkFlippers/qUnleashed), GPL-3.0. Zachováváme původní autory a licenci.
+## Aplikace
 
-Projekt je ve fázi přípravy. APK ani připojení k zařízení zatím nejsou ověřené. Zdrojový kód aplikace a vývojových skills bude uložen v tomto repozitáři.
+- Domovská obrazovka DonnyBoy, vstup do BLE/USB companion aplikace.
+- REPO a WEB otevírají firmware DONNY BOY CZ ve výchozím prohlížeči.
+- INFO vysvětluje původ forku a odkazuje na podporu Unleashed.
+- Samostatné šedobílé tlačítko Zapnout oznámení žádá systémové oprávnění.
+- DONNY BOY CZ je první firmware v nabídce. GitHub Releases se převádějí do instalačního katalogu; jen f7 update TGZ s SHA-256 a očekávanou adresou.
+- Zachované funkce qUnleashed: BLE/USB, soubory, archiv, vzdálené ovládání. Funkčnost na fyzickém zařízení vyžaduje ověření.
+
+## Sestavení
+
+Větev `dev`. GitHub Actions: **DonnyBoy Android**. První běh importuje kompletní zdrojový strom qUnleashed z pevného commitu `388331c619fabe01a19a4149d58b72d2888f722b`, včetně submodulů. Cizí workflows se neaktivují. Změny se uloží do dev bez force push. Další běhy pracují s uloženými zdroji.
+
+```sh
+git clone --branch dev --recurse-submodules https://github.com/luciferbelzebob3-afk/DONNYBOYCZAPK.git
+cd DONNYBOYCZAPK
+flutter pub get --enforce-lockfile
+flutter analyze --no-pub
+flutter test --no-pub test/donnyboy_test.dart
+flutter build apk --release --build-name=0.1.0 --build-number=1
+```
+
+Flutter 3.47.1 a Java 17 podle upstreamu. Běh musí dokončit analýzu, testy a build před vytvořením prerelease. Výsledkem je DonnyBoy-0.1.0-preview.apk a SHA256SUMS.
+
+**Preview používá vývojový podpis**, dokud nejsou připravené vlastní podpisové klíče. Klíče nevkládat do repozitáře. Není určeno pro Google Play; vývojový podpis mezi běhy nemusí zůstat stejný. Push přes FCM je v preview záměrně nedostupný; povolení systémových oznámení samo nevytvoří službu pro upozornění na release.
+
+## Vývojový plugin
+
+Zdroj: `plugins/donnyboy-android-devkit/`. Obsahuje skills pro aplikaci, propojení s firmwarem a release. ZIP přikládá úspěšný build. Uložení zdrojů a ZIP není totéž jako instalace pluginu do účtu ChatGPT. Přehled dodaných zdrojů: [docs/sources.md](docs/sources.md).
+
+Firmware: https://github.com/luciferbelzebob3-afk/DONNYBOYCZ  
+Web: https://luciferbelzebob3-afk.github.io/DONNYBOYCZ/  
+Podpora Unleashed: https://flipperunleashed.com/

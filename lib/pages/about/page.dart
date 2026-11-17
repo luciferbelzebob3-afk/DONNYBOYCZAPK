@@ -55,7 +55,7 @@ class AboutPage extends StatelessWidget {
       await const MethodChannel('donnyboy/releases').invokeMethod<void>('disable');
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sledování nových verzí vypnutý.')),
+        const SnackBar(content: Text('Sledování nových verzí je vypnuté.')),
       );
     } catch (_) {
       if (context.mounted) {

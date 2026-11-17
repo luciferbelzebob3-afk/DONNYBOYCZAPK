@@ -1,3 +1,13 @@
+# Čeština v DonnyBoy
+
+Český překlad se udržuje přímo v `translations/app_cs.arb` v tomto repozitáři. Crowdin workflows upstreamu tu nejsou aktivní. Anglická šablona určuje klíče a parametry; pro každý její text musí existovat česká verze. Zachovej názvy proměnných, ICU syntaxi, cesty, protokoly a identifikátory. Pro množné číslo používej `one`, `few` a `other`. Android texty piš s diakritikou. Nové názvy stylů map se překládají přes ARB, jejich technická ID zůstávají beze změny.
+
+Spusť `python3 tool/check_czech_translation.py`. Flutter generování a testy vyžadují funkční SDK; sestavení APK a Actions spouštěj jen s výslovným souhlasem uživatele.
+
+Následující převzatá dokumentace popisuje překlady původního projektu, nikoliv správu českého katalogu tohoto forku.
+
+---
+
 # Translating qUnleashed
 
 For translators, and short on purpose. The repository's own

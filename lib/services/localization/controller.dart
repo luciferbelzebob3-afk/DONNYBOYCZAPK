@@ -19,7 +19,7 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
 
   static final QLocaleController instance = QLocaleController._();
 
-  Locale? _locale;
+  Locale? _locale = fallback;
 
   /// Locale the user picked, or null while the app follows the device.
   Locale? get locale => _locale;
@@ -28,8 +28,7 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
 
   static List<Locale> get supported => L10n.supportedLocales;
 
-  /// What the app renders in when it has nothing better: the ARB template's
-  /// own language.
+  /// DonnyBoy defaults to Czech, including devices without a matching locale.
   ///
   /// It has to be named rather than taken from the head of the list.
   /// `basicLocaleListResolution` answers with the *first* entry of whatever it
@@ -39,7 +38,7 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
   /// whichever language sorts first. It was `en` until Belarusian arrived from
   /// Crowdin and silently became `be`, which would have rendered the whole app
   /// in Belarusian on every device whose language it does not speak.
-  static const Locale fallback = Locale('en');
+  static const Locale fallback = Locale('cs');
 
   /// [supported], with [fallback] first, for anything that resolves a device
   /// language. The picker uses [supported] instead, where sorted is what a
@@ -111,7 +110,16 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
     }
     final raw = reader.orNull<String>(_prefLocale);
     reader.report('[Locale]');
-    if (raw == null || raw.isEmpty) return;
+    if (raw == null || raw.isEmpty) {
+      _locale = fallback;
+      notifyListeners();
+      return;
+    }
+    if (raw == 'system') {
+      _locale = null;
+      notifyListeners();
+      return;
+    }
     for (final locale in L10n.supportedLocales) {
       if (locale.languageCode == raw) {
         if (locale != _locale) {
@@ -123,7 +131,7 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Null follows the system.
+  /// Null follows the system; a fresh installation defaults to Czech.
   ///
   /// Asserted rather than filtered because [l10n] resolves through this and
   /// `lookupL10n` throws for a language it was not generated for - and
@@ -144,15 +152,12 @@ class QLocaleController extends ChangeNotifier with WidgetsBindingObserver {
     // unlabelled `[uncaught]` naming no setting, and a store that refused the
     // write said nothing at all.
     //
-    // Following the system is an absent preference, not a stored "system",
-    // so the null case removes rather than writes - one of the two per call,
-    // never both. A refused removal reads as "locale.code did not persist"
-    // and means the old language is still on disk and comes back at the next
-    // launch.
+    // Store system explicitly to distinguish it from a fresh Czech install.
+    // A refused write leaves the previous choice for the next launch.
     await persistSetting(
       _prefLocale,
       (prefs) => locale == null
-          ? prefs.remove(_prefLocale)
+          ? prefs.setString(_prefLocale, 'system')
           : prefs.setString(_prefLocale, locale.languageCode),
     );
   }

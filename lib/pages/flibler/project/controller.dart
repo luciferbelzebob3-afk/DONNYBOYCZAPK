@@ -361,7 +361,7 @@ class FliblerProjectController extends ChangeNotifier {
     final artifacts = deployable;
     if (artifacts.isEmpty || _uploading) return false;
     if (!deviceReady) {
-      _error = 'Connect the device first';
+      _error = l10n.fliblerErrorConnectDevice;
       notifyListeners();
       return false;
     }

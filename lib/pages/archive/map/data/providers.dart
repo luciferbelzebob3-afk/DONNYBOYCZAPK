@@ -98,13 +98,13 @@ MapTileProvider cartoProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'rastertiles/voyager_labels_under',
-      label: 'Voyager, labels under',
+      label: s.mapStyleVoyagerUnder,
       description: s.mapDesignVoyagerLabelsUnderDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'rastertiles/voyager_nolabels',
-      label: 'Voyager, no labels',
+      label: s.mapStyleVoyagerNoLabels,
       description: s.mapDesignVoyagerNoLabelsDesc,
       dark: false,
     ),
@@ -116,7 +116,7 @@ MapTileProvider cartoProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'light_nolabels',
-      label: 'Positron, no labels',
+      label: s.mapStylePositronNoLabels,
       description: s.mapDesignPositronNoLabelsDesc,
       dark: false,
     ),
@@ -128,7 +128,7 @@ MapTileProvider cartoProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'dark_nolabels',
-      label: 'Dark Matter, no labels',
+      label: s.mapStyleDarkMatterNoLabels,
       description: s.mapDesignDarkMatterNoLabelsDesc,
       dark: true,
     ),
@@ -143,14 +143,14 @@ MapTileProvider osmProvider(L10n s) => MapTileProvider(
   designs: <MapTileDesign>[
     MapTileDesign(
       id: 'standard',
-      label: 'Standard',
+      label: s.mapStyleStandard,
       description: s.mapDesignOsmStandardDesc,
       dark: false,
       template: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     ),
     MapTileDesign(
       id: 'de',
-      label: 'German style',
+      label: s.mapStyleGerman,
       description: s.mapDesignOsmGermanDesc,
       dark: false,
       template: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
@@ -158,7 +158,7 @@ MapTileProvider osmProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'hot',
-      label: 'Humanitarian',
+      label: s.mapStyleHumanitarian,
       description: s.mapDesignOsmHotDesc,
       dark: false,
       template: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
@@ -188,7 +188,7 @@ MapTileProvider openTopoProvider(L10n s) => MapTileProvider(
   designs: <MapTileDesign>[
     MapTileDesign(
       id: 'topo',
-      label: 'Topographic',
+      label: s.mapStyleTopographic,
       description: s.mapDesignTopographicDesc,
       dark: false,
       template: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
@@ -264,7 +264,7 @@ MapTileProvider stadiaProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'outdoors',
-      label: 'Outdoors',
+      label: s.mapStyleOutdoors,
       description: s.mapDesignStadiaOutdoorsDesc,
       dark: false,
     ),
@@ -343,19 +343,19 @@ MapTileProvider thunderforestProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'transport',
-      label: 'Transport',
+      label: s.mapStyleTransport,
       description: s.mapDesignTransportDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'landscape',
-      label: 'Landscape',
+      label: s.mapStyleLandscape,
       description: s.mapDesignLandscapeDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'outdoors',
-      label: 'Outdoors',
+      label: s.mapStyleOutdoors,
       description: s.mapDesignThunderforestOutdoorsDesc,
       dark: false,
     ),
@@ -367,7 +367,7 @@ MapTileProvider thunderforestProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'neighbourhood',
-      label: 'Neighbourhood',
+      label: s.mapStyleNeighbourhood,
       description: s.mapDesignNeighbourhoodDesc,
       dark: false,
     ),
@@ -379,7 +379,7 @@ MapTileProvider thunderforestProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'transport-dark',
-      label: 'Transport Dark',
+      label: s.mapStyleTransportDark,
       description: s.mapDesignTransportDarkDesc,
       dark: true,
     ),
@@ -414,37 +414,37 @@ MapTileProvider mapTilerProvider(L10n s) => MapTileProvider(
   designs: <MapTileDesign>[
     MapTileDesign(
       id: 'streets-v2',
-      label: 'Streets',
+      label: s.mapStyleStreets,
       description: s.mapDesignMapTilerStreetsDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'basic-v2',
-      label: 'Basic',
+      label: s.mapStyleBasic,
       description: s.mapDesignMapTilerBasicDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'bright-v2',
-      label: 'Bright',
+      label: s.mapStyleBright,
       description: s.mapDesignMapTilerBrightDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'outdoor-v2',
-      label: 'Outdoor',
+      label: s.mapStyleOutdoor,
       description: s.mapDesignMapTilerOutdoorDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'topo-v2',
-      label: 'Topo',
+      label: s.mapStyleTopo,
       description: s.mapDesignMapTilerTopoDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'winter-v2',
-      label: 'Winter',
+      label: s.mapStyleWinter,
       description: s.mapDesignMapTilerWinterDesc,
       dark: false,
     ),
@@ -456,7 +456,7 @@ MapTileProvider mapTilerProvider(L10n s) => MapTileProvider(
     ),
     MapTileDesign(
       id: 'satellite',
-      label: 'Satellite',
+      label: s.mapStyleSatellite,
       description: s.mapDesignMapTilerSatelliteDesc,
       dark: true,
       template:
@@ -496,49 +496,49 @@ MapTileProvider mapboxProvider(L10n s) => MapTileProvider(
   designs: <MapTileDesign>[
     MapTileDesign(
       id: 'streets-v12',
-      label: 'Streets',
+      label: s.mapStyleStreets,
       description: s.mapDesignMapboxStreetsDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'outdoors-v12',
-      label: 'Outdoors',
+      label: s.mapStyleOutdoors,
       description: s.mapDesignMapboxOutdoorsDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'light-v11',
-      label: 'Light',
+      label: s.mapStyleLight,
       description: s.mapDesignMapboxLightDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'navigation-day-v1',
-      label: 'Navigation Day',
+      label: s.mapStyleNavigationDay,
       description: s.mapDesignMapboxNavigationDayDesc,
       dark: false,
     ),
     MapTileDesign(
       id: 'dark-v11',
-      label: 'Dark',
+      label: s.mapStyleDark,
       description: s.mapDesignMapboxDarkDesc,
       dark: true,
     ),
     MapTileDesign(
       id: 'navigation-night-v1',
-      label: 'Navigation Night',
+      label: s.mapStyleNavigationNight,
       description: s.mapDesignMapboxNavigationNightDesc,
       dark: true,
     ),
     MapTileDesign(
       id: 'satellite-v9',
-      label: 'Satellite',
+      label: s.mapStyleSatellite,
       description: s.mapDesignMapboxSatelliteDesc,
       dark: true,
     ),
     MapTileDesign(
       id: 'satellite-streets-v12',
-      label: 'Satellite Streets',
+      label: s.mapStyleSatelliteStreets,
       description: s.mapDesignMapboxSatelliteStreetsDesc,
       dark: true,
     ),

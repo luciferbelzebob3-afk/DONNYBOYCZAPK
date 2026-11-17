@@ -993,7 +993,7 @@ class _BitsCard extends StatelessWidget {
               Expanded(
                 child: _SectionTitle(l10n.plotDecodedBits, icon: Icons.tag),
               ),
-              if (bits.isNotEmpty) _CopyButton(value: bits, label: 'bits'),
+              if (bits.isNotEmpty) _CopyButton(value: bits, label: l10n.hexBits),
             ],
           ),
           const SizedBox(height: 10),

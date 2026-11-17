@@ -35,3 +35,11 @@ Zdroj: `plugins/donnyboy-android-devkit/`. Obsahuje skills pro aplikaci, propoje
 Firmware: https://github.com/luciferbelzebob3-afk/DONNYBOYCZ  
 Web: https://luciferbelzebob3-afk.github.io/DONNYBOYCZ/  
 Podpora Unleashed: https://flipperunleashed.com/
+
+## Český překlad ve zdrojích
+
+Větev `dev` obsahuje kompletní český katalog `translations/app_cs.arb` (1 484 položek, včetně názvů mapových stylů a Android widgetů). Nová instalace používá češtinu; výslovně vybraný jazyk i volba podle systému zůstávají zachované. České texty se udržují přímo v tomto forku, bez Crowdin synchronizace. Převzaté názvy produktů, protokolů, datové formáty a obsah načtený z externích zdrojů se nepřekládají.
+
+Kontrola bez Flutteru: `python3 tool/check_czech_translation.py`. Ověřuje úplnost, ICU proměnné a české množné číslo. Testy generovaných textů a ukládání jazyka: `flutter test test/czech_localization_test.dart test/locale_fallback_test.dart`.
+
+Tato aktualizace mění zdroje překladu. Vydání `apk-preview-4` vzniklo před ní a nový překlad ještě neobsahuje. Nový build ani GitHub Actions se při tomto překladovém commitu nespouštějí.

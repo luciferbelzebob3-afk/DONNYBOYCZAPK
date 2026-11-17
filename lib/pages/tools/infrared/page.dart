@@ -427,7 +427,7 @@ class _ErrorView extends StatelessWidget {
               style: TextStyle(color: colors.textPrimary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: onRetry, child: const Text('Retry')),
+            FilledButton(onPressed: onRetry, child: Text(context.l10n.commonRetry)),
           ],
         ),
       ),

@@ -8639,5 +8639,106 @@
   "permissionSettingsOpenFailed": "Could not open system settings. Open Settings, find qUnleashed, and change it there.",
   "@permissionSettingsOpenFailed": {
     "description": "Shown when the button on a permission notice could not launch the system settings screen. Tells the user how to get there by hand, because on a non-dismissible notice that button is the only way forward. TRANSLATORS: qUnleashed is the app name and is not translated."
+  },
+
+  "mapStyleStandard": "Standard",
+  "@mapStyleStandard": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleGerman": "German style",
+  "@mapStyleGerman": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleHumanitarian": "Humanitarian",
+  "@mapStyleHumanitarian": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleTopographic": "Topographic",
+  "@mapStyleTopographic": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleOutdoors": "Outdoors",
+  "@mapStyleOutdoors": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleTransport": "Transport",
+  "@mapStyleTransport": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleLandscape": "Landscape",
+  "@mapStyleLandscape": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleNeighbourhood": "Neighbourhood",
+  "@mapStyleNeighbourhood": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleTransportDark": "Transport Dark",
+  "@mapStyleTransportDark": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleStreets": "Streets",
+  "@mapStyleStreets": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleBasic": "Basic",
+  "@mapStyleBasic": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleBright": "Bright",
+  "@mapStyleBright": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleOutdoor": "Outdoor",
+  "@mapStyleOutdoor": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleTopo": "Topo",
+  "@mapStyleTopo": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleWinter": "Winter",
+  "@mapStyleWinter": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleSatellite": "Satellite",
+  "@mapStyleSatellite": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleLight": "Light",
+  "@mapStyleLight": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleDark": "Dark",
+  "@mapStyleDark": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleNavigationDay": "Navigation Day",
+  "@mapStyleNavigationDay": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleNavigationNight": "Navigation Night",
+  "@mapStyleNavigationNight": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleSatelliteStreets": "Satellite Streets",
+  "@mapStyleSatelliteStreets": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleVoyagerUnder": "Voyager, labels under",
+  "@mapStyleVoyagerUnder": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleVoyagerNoLabels": "Voyager, no labels",
+  "@mapStyleVoyagerNoLabels": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStylePositronNoLabels": "Positron, no labels",
+  "@mapStylePositronNoLabels": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
+  },
+  "mapStyleDarkMatterNoLabels": "Dark Matter, no labels",
+  "@mapStyleDarkMatterNoLabels": {
+    "description": "Display label of a map style. This does not change the provider style identifier."
   }
 }

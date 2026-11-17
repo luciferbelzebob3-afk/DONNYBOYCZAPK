@@ -16,12 +16,17 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:qunleashed/services/localization/controller.dart';
 import 'package:qunleashed/services/localization/l10n.dart';
 
 import 'arb.dart';
 
 void main() {
+  test('a fresh DonnyBoy session starts in Czech', () {
+    expect(QLocaleController.instance.locale, const Locale('cs'));
+  });
+
   test('the fallback is a language the app actually speaks', () {
     expect(
       L10n.supportedLocales,
@@ -69,6 +74,11 @@ void main() {
   group('the controller resolves through it', () {
     final binding = TestWidgetsFlutterBinding.ensureInitialized();
 
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      await QLocaleController.instance.setLocale(null);
+    });
+
     tearDown(() {
       binding.platformDispatcher.clearLocalesTestValue();
     });
@@ -100,7 +110,7 @@ void main() {
       ];
       expect(
         l10n.languageName,
-        arbStrings(File('$kArbDir/app_en.arb'))['languageName'],
+        arbStrings(File('$kArbDir/app_cs.arb'))['languageName'],
       );
     });
   });

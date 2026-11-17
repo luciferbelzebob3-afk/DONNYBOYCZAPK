@@ -2,7 +2,7 @@ name: DonnyBoy Android
 on:
   push:
     branches: [dev]
-    paths: ['.github/workflows/donnyboy-android.yml', 'tool/donnyboy/**']
+    paths: ['.github/workflows/donnyboy-android.yml', 'tool/donnyboy/**', 'lib/**', 'android/**', 'test/**', 'translations/**', 'pubspec.*', 'plugins/**']
   workflow_dispatch:
 permissions:
   contents: write
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +26,15 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: ./.github/actions/setup-flutter
+      - name: Zabalit vyvojovy plugin
+        run: |
+          mkdir -p dist
+          python3 tool/donnyboy/package_plugin.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: donnyboy-android-devkit
+          path: dist/donnyboy-android-devkit.zip
+          if-no-files-found: error
       - name: Kontrola
         run: |
           flutter analyze --no-pub
@@ -44,13 +53,9 @@ jobs:
           name: DonnyBoy-0.1.0-preview
           path: dist/*
           if-no-files-found: error
-      - name: Zabalit vyvojovy plugin
-        run: |
-          cd plugins
-          zip -r ../dist/donnyboy-android-devkit.zip donnyboy-android-devkit
       - name: Vydat testovaci APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="apk-preview-${{ github.run_number }}"
-          gh release create "$tag" dist/* --target dev --prerelease --title "DonnyBoy 0.1.0 preview" --notes "Testovací release sestavený v režimu release s vývojovým podpisem. Není určený pro Google Play. Zdroj: větev dev. BLE/USB vyžaduje ověření na fyzickém zařízení. Vývojový plugin je přiložený jako ZIP."
+          gh release create "$tag" dist/* --target "$(git rev-parse HEAD)" --prerelease --title "DonnyBoy 0.1.0 preview" --notes "Testovací release sestavený v režimu release s vývojovým podpisem. Není určený pro Google Play. Zdroj: větev dev. BLE/USB vyžaduje ověření na fyzickém zařízení. Vývojový plugin je přiložený jako ZIP."

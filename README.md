@@ -13,7 +13,7 @@ Autor úprav: **NQLSH**. Android 10 a novější. Fork [qUnleashed](https://gith
 
 ## Sestavení
 
-Větev `dev`. GitHub Actions: **DonnyBoy Android**. První běh importuje kompletní zdrojový strom qUnleashed z pevného commitu `388331c619fabe01a19a4149d58b72d2888f722b`, včetně submodulů. Cizí workflows se neaktivují. Změny se uloží do dev bez force push. Další běhy pracují s uloženými zdroji.
+Větev `dev`. GitHub Actions: **DonnyBoy Android**. Dokončený import uložil kompletní zdrojový strom qUnleashed z pevného commitu `388331c619fabe01a19a4149d58b72d2888f722b`, včetně submodulů. Cizí workflows se neaktivují. Změny se uloží do dev bez force push. Další běhy pracují s uloženými zdroji.
 
 ```sh
 git clone --branch dev --recurse-submodules https://github.com/luciferbelzebob3-afk/DONNYBOYCZAPK.git
@@ -26,7 +26,7 @@ flutter build apk --release --build-name=0.1.0 --build-number=1
 
 Flutter 3.47.1 a Java 17 podle upstreamu. Běh musí dokončit analýzu, testy a build před vytvořením prerelease. Výsledkem je DonnyBoy-0.1.0-preview.apk a SHA256SUMS.
 
-**Preview používá vývojový podpis**, dokud nejsou připravené vlastní podpisové klíče. Klíče nevkládat do repozitáře. Není určeno pro Google Play; vývojový podpis mezi běhy nemusí zůstat stejný. Push přes FCM je v preview záměrně nedostupný; povolení systémových oznámení samo nevytvoří službu pro upozornění na release.
+**Preview používá vývojový podpis**, dokud nejsou připravené vlastní podpisové klíče. Klíče nevkládat do repozitáře. Není určeno pro Google Play; vývojový podpis mezi běhy nemusí zůstat stejný. Nová stabilní vydání firmwaru hlídá po zapnutí nativní Android JobScheduler (nejdřív přibližně po 15 minutách, podle úspory baterie i později). První kontrola uloží současný stav; upozorní na další verzi. Sledování lze vypnout. Firebase ani placený server nejsou potřeba. Upstream FCM přepínače zůstávají nedostupné.
 
 ## Vývojový plugin
 

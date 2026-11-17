@@ -14,6 +14,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var releaseChannel: MethodChannel? = null
     private val gnssChannel = "qunleashed/gnss"
     private var gnssMethodChannel: MethodChannel? = null
     private var locationManager: LocationManager? = null
@@ -27,6 +28,18 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        releaseChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "donnyboy/releases").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "enable" -> result.success(DonnyBoyReleaseJob.enable(this))
+                    "disable" -> {
+                        DonnyBoyReleaseJob.disable(this)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         // The engine may have been started cold by a widget tap: bring it up
         // to the full app now that there is a screen.
         HomeWidgetChannel.attach(this, flutterEngine)
@@ -71,6 +84,8 @@ class MainActivity : FlutterActivity() {
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         if (HomeWidgetChannel.activity === this) HomeWidgetChannel.activity = null
+        releaseChannel?.setMethodCallHandler(null)
+        releaseChannel = null
         gnssMethodChannel?.setMethodCallHandler(null)
         gnssMethodChannel = null
         super.cleanUpFlutterEngine(flutterEngine)

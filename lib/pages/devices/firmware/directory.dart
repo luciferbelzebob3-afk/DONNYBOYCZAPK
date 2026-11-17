@@ -802,7 +802,9 @@ class DonnyBoyParser extends FirmwareParser {
         if (!RegExp(r'^sha256:[0-9a-fA-F]{64}$').hasMatch(digest)) continue;
         final uri = Uri.tryParse(url);
         if (uri == null || uri.scheme != 'https' || uri.host != 'github.com' ||
-            !uri.path.startsWith('/luciferbelzebob3-afk/DONNYBOYCZ/releases/download/')) continue;
+            !uri.path.startsWith('/luciferbelzebob3-afk/DONNYBOYCZ/releases/download/')) {
+          continue;
+        }
         files.add(FirmwareFile(url: url, target: 'f7', type: 'update_tgz',
           sha256: digest.substring(7).toLowerCase()));
       }

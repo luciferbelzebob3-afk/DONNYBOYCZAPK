@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../components/navigation.dart';
@@ -23,17 +24,46 @@ class AboutPage extends StatelessWidget {
   }
 
   Future<void> _notifications(BuildContext context) async {
-    final status = await Permission.notification.request();
-    if (!context.mounted) return;
-    if (status.isPermanentlyDenied) {
-      await openAppSettings();
-      return;
+    try {
+      final status = await Permission.notification.request();
+      if (!context.mounted) return;
+      if (status.isPermanentlyDenied) {
+        await openAppSettings();
+        return;
+      }
+      var message = 'Oznámení nejsou povolená.';
+      if (status.isGranted) {
+        final scheduled = await const MethodChannel('donnyboy/releases')
+            .invokeMethod<bool>('enable') ?? false;
+        message = scheduled
+            ? 'Kontrola nových verzí zapnutá. Android ji spouští přibližně po 15 minutách nebo později.'
+            : 'Sledování verzí se nepodařilo zapnout.';
+      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Oznámení se nepodařilo nastavit.')),
+        );
+      }
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      status.isGranted
-        ? 'Oznámení jsou povolená. Push nových vydání zatím není nakonfigurovaný.'
-        : 'Oznámení nejsou povolená.',
-    )));
+  }
+
+  Future<void> _disableNotifications(BuildContext context) async {
+    try {
+      await const MethodChannel('donnyboy/releases').invokeMethod<void>('disable');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sledování nových verzí vypnutý.')),
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Změna nastavení se nepodařila.')),
+        );
+      }
+    }
   }
 
   @override
@@ -80,7 +110,7 @@ class AboutPage extends StatelessWidget {
                     'Firmware DONNY BOY CZ vychází z Unleashed.\n\n'
                     'Pokud se ti aplikace nebo firmware líbí, podpoř vývojáře Unleashed. '
                     'Původní autoři a licence GPL-3.0 zůstávají zachovaní.\n\n'
-                    'Verze 0.1.0 preview. Oznámení vydání přes Firebase nejsou nakonfigurovaná.',
+                    'Verze 0.1.0 preview. Nová vydání sleduje Android na pozadí bez Firebase.',
                   )),
                   actions: [
                     TextButton(onPressed: () => _open(ctx, 'https://flipperunleashed.com/'), child: const Text('Podpořit Unleashed')),
@@ -97,7 +127,8 @@ class AboutPage extends StatelessWidget {
               onPressed: () => _notifications(context),
               child: const Text('Zapnout oznámení'),
             ),
-            const Text('Systémové oprávnění pro oznámení. Upozornění na nová vydání budou vyžadovat samostatné nastavení.',
+            TextButton(onPressed: () => _disableNotifications(context), child: const Text('Vypnout sledování verzí')),
+            const Text('Nová stabilní vydání firmwaru kontroluje Android na pozadí. První kontrola si uloží současnou verzi; upozorní až na další. Úspora baterie může kontrolu odložit.',
               textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12)),
           ],
         ),

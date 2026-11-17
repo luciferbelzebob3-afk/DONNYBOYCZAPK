@@ -5,7 +5,7 @@ from verify_signature import verify
 class SignatureTest(unittest.TestCase):
     def test_numbered_and_sdk_range_signers(self):
         digest = 'ab' * 32
-        for prefix in ['Signer #1', 'Signer (minSdkVersion=29, maxSdkVersion=32)']:
+        for prefix in ['Signer #1', 'Signer (minSdkVersion=29, maxSdkVersion=32)', 'V2 Signer:', 'V3.1 Signer:']:
             with self.subTest(prefix=prefix):
                 self.assertEqual(verify(f'{prefix} certificate SHA-256 digest: {digest}\n', digest), {digest})
 

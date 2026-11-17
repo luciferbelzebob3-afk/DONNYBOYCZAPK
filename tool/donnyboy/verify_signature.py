@@ -8,7 +8,7 @@ from pathlib import Path
 def verify(text: str, expected: str) -> set[str]:
     # Android build-tools may label signers by number or their SDK range.
     found = set(re.findall(
-        r'^Signer (?:#\d+|\([^\r\n]+\)) certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$',
+        r'^(?:Signer (?:#\d+|\([^\r\n]+\))|V\d+(?:\.\d+)? Signer:) certificate SHA-256 digest:\s*([0-9a-fA-F]{64})\s*$',
         text, re.MULTILINE,
     ))
     found = {value.lower() for value in found}

@@ -1,13 +1,14 @@
-První oficiální vydání DonnyBoy pro Android.
+DonnyBoy 1.0.1
 
-Do týhle verze jsem přidal kompletní český rozhraní, černý vzhled s oranžovejma detailama, logo DONNY BOY a ikonu našeho kluka v kapuci. Čeština je při nový instalaci nastavená rovnou.
+Aplikace se po spuštění otevře rovnou na panelu instalace a aktualizace DONNY BOY CZ.
 
-Aplikace obsahuje přístup k funkcím qUnleashed, nabídku firmwaru DONNY BOY CZ a volitelný upozornění na nový stabilní verze. Na úvodní obrazovce najdeš taky REPO, WEB a INFO.
+- Nové rozhraní Donny Boy: černý podklad, stříbrný text, oranžové akcenty, nové ikony, navigace, panely a formuláře.
+- Nová ikona aplikace: náš kluk v kapuci s tenkou černou konturou.
+- Nabídka firmwaru obsahuje pouze DONNY BOY CZ. Odstraněné ostatní firmwary a instalace vlastního archivu „Custom“.
+- Původní uložená volba Custom se převede na vydání DONNY BOY.
+- Zachovaná správa souborů, aplikace, nástroje a připojení přes Bluetooth i USB.
+- Upozornění na nové stabilní vydání firmwaru zůstává dostupné přes ⓘ → Zapnout oznámení. Kontrola běží na pozadí; úspora baterie ji může odložit.
 
-**Android 10 a novější.** APK má vlastní release podpis. Při přechodu ze starýho preview může Android vyžadovat jeho odinstalování kvůli jinýmu certifikátu; odinstalace smaže místní data aplikace.
-
-BLE/USB a instalaci firmwaru zatím nemám ověřený na fyzickým zařízení. Chyby mi prosím napiš do Issues s modelem telefonu a verzí Androidu.
-
-K APK přikládám kontrolní součet SHA-256 a veřejnej podpisovej certifikát. DonnyBoy vychází z qUnleashed a zachovává původní autory i licenci GPL-3.0. Díky vývojářům Unleashed za jejich práci.
+Podepsáno stejným klíčem jako DonnyBoy 1.0.0. Instalace jako aktualizace zachová data aplikace. Připojení k fyzickému Flipperu a chování na konkrétním telefonu vyžaduje ověření na zařízení.
 
 NQLSH

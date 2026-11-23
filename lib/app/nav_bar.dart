@@ -591,8 +591,9 @@ class _NavIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final branded = donnyIconFor(asset);
-    if (branded != null)
+    if (branded != null) {
       return Icon(branded, size: 23, color: context.appColors.textSecondary);
+    }
     return SvgPicture.asset(
       asset,
       colorFilter: ColorFilter.mode(

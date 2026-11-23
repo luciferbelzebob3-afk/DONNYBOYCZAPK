@@ -282,7 +282,7 @@ class _MapPanelHeader extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Icon(Icons.copy, size: 11, color: colors.textMuted),
+                  Icon(Icons.copy_outlined, size: 11, color: colors.textMuted),
                 ],
               ),
             ),
@@ -330,7 +330,7 @@ class _MapPanelHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              blocked ? Icons.settings : Icons.location_on_outlined,
+              blocked ? Icons.settings_outlined : Icons.location_on_outlined,
               size: 13,
               color: colors.accent,
             ),
@@ -348,7 +348,7 @@ class _MapPanelHeader extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.directions_walk, size: 13, color: colors.accent),
+        Icon(Icons.directions_walk_outlined, size: 13, color: colors.accent),
         const SizedBox(width: 3),
         Text(
           MapToolController.formatDistance(distance),
@@ -362,7 +362,11 @@ class _MapPanelHeader extends StatelessWidget {
           const SizedBox(width: 5),
           Transform.rotate(
             angle: bearing * 3.1415926 / 180,
-            child: Icon(Icons.navigation, size: 12, color: colors.info),
+            child: Icon(
+              Icons.navigation_outlined,
+              size: 12,
+              color: colors.info,
+            ),
           ),
           const SizedBox(width: 2),
           Text(
@@ -515,7 +519,11 @@ class _MapPinTile extends StatelessWidget {
                 ),
               ),
               if (selected)
-                Icon(Icons.chevron_right, size: 16, color: colors.accent),
+                Icon(
+                  Icons.chevron_right_outlined,
+                  size: 16,
+                  color: colors.accent,
+                ),
             ],
           ),
         ),

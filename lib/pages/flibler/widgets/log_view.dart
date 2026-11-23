@@ -143,7 +143,7 @@ class _AssemblerLogViewState extends State<AssemblerLogView> {
                         _scroll.jumpTo(_scroll.position.maxScrollExtent);
                       }
                     },
-                    child: const Icon(Icons.arrow_downward, size: 18),
+                    child: const Icon(Icons.arrow_downward_outlined, size: 18),
                   ),
                 ),
             ],

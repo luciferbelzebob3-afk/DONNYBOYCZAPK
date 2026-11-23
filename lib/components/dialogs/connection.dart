@@ -394,7 +394,7 @@ class _ConnectionDialogState extends State<ConnectionDialog> {
                 constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                 iconSize: 20,
                 color: colors.accent,
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Icons.refresh_outlined),
               ),
             ),
         ],
@@ -416,7 +416,7 @@ class _ConnectionDialogState extends State<ConnectionDialog> {
             permission: AppPermission.bluetooth,
             severity: PermissionNoticeSeverity.blocking,
             padding: EdgeInsets.zero,
-            icon: Icons.bluetooth_disabled,
+            icon: Icons.bluetooth_disabled_outlined,
             title: context.l10n.permissionBluetoothDeniedTitle,
             body: context.l10n.permissionBluetoothDeniedPicker,
             onAction: _openSettings,
@@ -517,7 +517,7 @@ class _DeviceListItem extends StatelessWidget {
       child: InkResponse(
         onTap: onDisconnect,
         radius: 22,
-        child: Icon(Icons.link_off, size: 22, color: colors.danger),
+        child: Icon(Icons.link_off_outlined, size: 22, color: colors.danger),
       ),
     );
   }
@@ -540,8 +540,10 @@ class _DeviceListItem extends StatelessWidget {
           children: [
             Icon(
               isBle
-                  ? (_held ? Icons.bluetooth_connected : Icons.bluetooth)
-                  : Icons.usb,
+                  ? (_held
+                        ? Icons.bluetooth_connected_outlined
+                        : Icons.bluetooth_outlined)
+                  : Icons.usb_outlined,
               color: isBle ? colors.info : colors.accent,
               size: 28,
             ),

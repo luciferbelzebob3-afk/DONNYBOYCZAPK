@@ -177,7 +177,9 @@ class _IrLibSettingsDialogState extends State<IrLibSettingsDialog> {
                 enabled: !downloading,
                 suffix: IconButton(
                   icon: Icon(
-                    _showToken ? Icons.visibility_off : Icons.visibility,
+                    _showToken
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
                     color: colors.textMuted,
                     size: 20,
                   ),

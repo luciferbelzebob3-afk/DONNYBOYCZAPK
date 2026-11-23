@@ -302,18 +302,24 @@ class _CatalogViewState extends State<CatalogView> {
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.manage_search, color: colors.textPrimary),
+                icon: Icon(
+                  Icons.manage_search_outlined,
+                  color: colors.textPrimary,
+                ),
                 tooltip: context.l10n.catalogManageTooltip,
                 onPressed: widget.onOpenManager,
               ),
               IconButton(
-                icon: Icon(Icons.add_circle_outline, color: colors.textPrimary),
+                icon: Icon(
+                  Icons.add_circle_outline_outlined,
+                  color: colors.textPrimary,
+                ),
                 tooltip: context.l10n.catalogSubmitTooltip,
                 onPressed: () => SubmitAppDialog.show(context),
               ),
               IconButton(
                 icon: Icon(
-                  _searchOpen ? Icons.close : Icons.search,
+                  _searchOpen ? Icons.close_outlined : Icons.search_outlined,
                   color: colors.textPrimary,
                 ),
                 onPressed: () {
@@ -336,7 +342,10 @@ class _CatalogViewState extends State<CatalogView> {
               onChanged: _ctrl.setQuery,
               decoration: InputDecoration(
                 hintText: context.l10n.catalogSearchHint,
-                prefixIcon: Icon(Icons.search, color: colors.textMuted),
+                prefixIcon: Icon(
+                  Icons.search_outlined,
+                  color: colors.textMuted,
+                ),
                 filled: true,
                 fillColor: colors.card,
                 border: OutlineInputBorder(

@@ -304,7 +304,7 @@ class _FirmwareCardState extends State<FirmwareCard> {
     final hasChangelog = latestFirmware?.changelog.trim().isNotEmpty ?? false;
 
     return FlipperPageCard(
-      title: context.l10n.firmwareUpdateTitle,
+      title: 'FIRMWARE / DONNY BOY CZ',
       // `trailingValue`, not `trailing`: this chip is text in a border, so it
       // grows with the text scale while the card's width does not, and in the
       // pinned slot it took the title's room and then ran the header off the
@@ -375,7 +375,7 @@ class _FirmwareCardState extends State<FirmwareCard> {
     return Row(
       children: [
         _CarouselNavButton(
-          icon: Icons.chevron_left,
+          icon: Icons.chevron_left_outlined,
           enabled: _page > 0,
           onTap: () => _goToPage(_page - 1),
         ),
@@ -450,7 +450,7 @@ class _FirmwareCardState extends State<FirmwareCard> {
           ),
         ),
         _CarouselNavButton(
-          icon: Icons.chevron_right,
+          icon: Icons.chevron_right_outlined,
           enabled: _page < config.firmwares.length - 1,
           onTap: () => _goToPage(_page + 1),
         ),
@@ -514,7 +514,7 @@ class _FirmwareSlide extends StatelessWidget {
               entry.assetPath,
               width: _imageSide,
               height: _imageSide,
-              fit: BoxFit.cover,
+              fit: BoxFit.contain,
             ),
           ),
           Column(
@@ -803,7 +803,7 @@ class SettingsDropdown<T> extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               Icon(
-                Icons.expand_more,
+                Icons.expand_more_outlined,
                 size: 18,
                 color: value == null ? colors.textMuted : colors.textSecondary,
               ),
@@ -900,7 +900,9 @@ class SettingsDropdown<T> extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Icon(
-                selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                selected
+                    ? Icons.radio_button_checked_outlined
+                    : Icons.radio_button_off_outlined,
                 size: 18,
                 color: selected ? accent : colors.textMuted,
               ),
@@ -936,7 +938,11 @@ class _WhatsNewButton extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 13, color: colors.textSecondary),
+              Icon(
+                Icons.error_outline_outlined,
+                size: 13,
+                color: colors.textSecondary,
+              ),
               const SizedBox(width: 4),
               // **`Flexible`, or the chip overflows itself.** The header
               // bounds this widget now - a `Wrap` hands each child its own

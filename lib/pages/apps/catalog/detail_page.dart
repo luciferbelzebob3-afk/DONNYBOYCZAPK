@@ -237,7 +237,7 @@ class _DetailAppBar extends StatelessWidget implements PreferredSizeWidget {
             if (controller.engine.isInstalled(detail.card))
               QPageAppBarAction(
                 tooltip: context.l10n.appDeleteTooltip,
-                icon: const Icon(Icons.delete_outline),
+                icon: const Icon(Icons.delete_outline_outlined),
                 onPressed: () => confirmDeleteApp(
                   context,
                   engine: controller.engine,
@@ -247,7 +247,7 @@ class _DetailAppBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             QPageAppBarAction(
               tooltip: context.l10n.appOpenPageTooltip,
-              icon: const Icon(Icons.open_in_new),
+              icon: const Icon(Icons.open_in_new_outlined),
               onPressed: () {
                 final url = detail.links?.manifestUri ?? '';
                 if (url.isNotEmpty) {
@@ -468,7 +468,11 @@ class _DeveloperLinks extends StatelessWidget {
               onTap: () => openUrl(context, e.url, inApp: false),
               child: Row(
                 children: [
-                  Icon(Icons.link, size: 18, color: colors.textSecondary),
+                  Icon(
+                    Icons.link_outlined,
+                    size: 18,
+                    color: colors.textSecondary,
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     e.label,

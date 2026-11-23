@@ -123,7 +123,7 @@ class _ArchivePageState extends State<ArchivePage> {
           style: TextStyle(color: colors.textMuted, fontSize: 14),
         ),
         const SizedBox(width: 6),
-        Icon(Icons.chevron_right, color: colors.textMuted),
+        Icon(Icons.chevron_right_outlined, color: colors.textMuted),
       ],
     );
   }

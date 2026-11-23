@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../components/navigation.dart';
 import 'license_page.dart';
 
@@ -11,7 +12,10 @@ class AboutPage extends StatelessWidget {
 
   Future<void> _open(BuildContext context, String url) async {
     try {
-      if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) {
+      if (!await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      )) {
         throw StateError('Prohlížeč není dostupný.');
       }
     } catch (_) {
@@ -33,14 +37,17 @@ class AboutPage extends StatelessWidget {
       }
       var message = 'Oznámení nejsou povolená.';
       if (status.isGranted) {
-        final scheduled = await const MethodChannel('donnyboy/releases')
-            .invokeMethod<bool>('enable') ?? false;
+        final scheduled =
+            await const MethodChannel('donnyboy/releases')
+                .invokeMethod<bool>('enable') ??
+            false;
         message = scheduled
             ? 'Kontrola nových verzí zapnutá. Android ji spouští přibližně po 15 minutách nebo později.'
             : 'Sledování verzí se nepodařilo zapnout.';
       }
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -52,7 +59,8 @@ class AboutPage extends StatelessWidget {
 
   Future<void> _disableNotifications(BuildContext context) async {
     try {
-      await const MethodChannel('donnyboy/releases').invokeMethod<void>('disable');
+      await const MethodChannel('donnyboy/releases')
+          .invokeMethod<void>('disable');
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sledování nových verzí je vypnuté.')),
@@ -90,50 +98,88 @@ class AboutPage extends StatelessWidget {
               'assets/img/donnyboy_logo.png',
               height: 150,
               fit: BoxFit.contain,
-              semanticLabel: 'DONNY BOY – pixelový kluk v kapuci místo písmene O',
+              semanticLabel:
+                  'DONNY BOY – pixelový kluk v kapuci místo písmene O',
             ),
             const SizedBox(height: 12),
-            const Text('Flipper Zero • NQLSH', textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70)),
-            const SizedBox(height: 32),
-            if (devicePage != null) FilledButton.icon(
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => devicePage!)),
-              icon: const Icon(Icons.bluetooth), label: const Text('Připojit Flipper Zero'),
+            const Text(
+              'Flipper Zero • NQLSH',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70),
             ),
-            FilledButton(onPressed: () => _open(context, 'https://github.com/luciferbelzebob3-afk/DONNYBOYCZ'), child: const Text('REPO')),
-            OutlinedButton(onPressed: () => _open(context, 'https://luciferbelzebob3-afk.github.io/DONNYBOYCZ/'), child: const Text('WEB')),
+            const SizedBox(height: 32),
+            if (devicePage != null)
+              FilledButton.icon(
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute<void>(builder: (_) => devicePage!)),
+                icon: const Icon(Icons.bluetooth_outlined),
+                label: const Text('Připojit Flipper Zero'),
+              ),
+            FilledButton(
+              onPressed: () => _open(
+                context,
+                'https://github.com/luciferbelzebob3-afk/DONNYBOYCZ',
+              ),
+              child: const Text('REPO'),
+            ),
+            OutlinedButton(
+              onPressed: () => _open(
+                context,
+                'https://luciferbelzebob3-afk.github.io/DONNYBOYCZ/',
+              ),
+              child: const Text('WEB'),
+            ),
             OutlinedButton(
               child: const Text('INFO'),
               onPressed: () => showDialog<void>(
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: const Text('O aplikaci DonnyBoy'),
-                  content: const SingleChildScrollView(child: Text(
-                    'Autor úprav: NQLSH\n\n'
-                    'DonnyBoy je fork aplikace qUnleashed z repozitáře DarkFlippers/qUnleashed. '
-                    'Firmware DONNY BOY CZ vychází z Unleashed.\n\n'
-                    'Pokud se ti aplikace nebo firmware líbí, podpoř vývojáře Unleashed. '
-                    'Původní autoři a licence GPL-3.0 zůstávají zachovaní.\n\n'
-                    'Verze 1.0.0. Nová vydání sleduje Android na pozadí bez Firebase.',
-                  )),
+                  content: const SingleChildScrollView(
+                    child: Text(
+                      'Autor úprav: NQLSH\n\n'
+                      'DonnyBoy je fork aplikace qUnleashed z repozitáře DarkFlippers/qUnleashed. '
+                      'Firmware DONNY BOY CZ vychází z Unleashed.\n\n'
+                      'Pokud se ti aplikace nebo firmware líbí, podpoř vývojáře Unleashed. '
+                      'Původní autoři a licence GPL-3.0 zůstávají zachovaní.\n\n'
+                      'Verze 1.0.0. Nová vydání sleduje Android na pozadí bez Firebase.',
+                    ),
+                  ),
                   actions: [
-                    TextButton(onPressed: () => _open(ctx, 'https://flipperunleashed.com/'), child: const Text('Podpořit Unleashed')),
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Zavřít')),
+                    TextButton(
+                      onPressed: () =>
+                          _open(ctx, 'https://flipperunleashed.com/'),
+                      child: const Text('Podpořit Unleashed'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Zavřít'),
+                    ),
                   ],
                 ),
               ),
             ),
-            TextButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => const AppLicensePage())), child: const Text('Licence a původní autoři')),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const AppLicensePage()),
+              ),
+              child: const Text('Licence a původní autoři'),
+            ),
             const SizedBox(height: 48),
             TextButton(
               style: TextButton.styleFrom(foregroundColor: Colors.white70),
               onPressed: () => _notifications(context),
               child: const Text('Zapnout oznámení'),
             ),
-            TextButton(onPressed: () => _disableNotifications(context), child: const Text('Vypnout sledování verzí')),
-            const Text('Nová stabilní vydání firmwaru kontroluje Android na pozadí. První kontrola si uloží současnou verzi; upozorní až na další. Úspora baterie může kontrolu odložit.',
-              textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 12)),
+            TextButton(
+              onPressed: () => _disableNotifications(context),
+              child: const Text('Vypnout sledování verzí'),
+            ),
+            const Text(
+              'Nová stabilní vydání firmwaru kontroluje Android na pozadí. První kontrola si uloží současnou verzi; upozorní až na další. Úspora baterie může kontrolu odložit.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
           ],
         ),
       ),

@@ -107,7 +107,7 @@ class _StorageUsageCardsState extends State<StorageUsageCards> {
     final entries = [
       _StorageEntry(
         title: l10n.storageInternal,
-        icon: Icons.smartphone,
+        icon: Icons.smartphone_outlined,
         onTap: widget.onOpenInternal,
         // `/int` capacity isn't exposed, so no fill bar — just used size.
         percent: null,
@@ -115,7 +115,7 @@ class _StorageUsageCardsState extends State<StorageUsageCards> {
       ),
       _StorageEntry(
         title: l10n.storageExternal,
-        icon: Icons.sd_card,
+        icon: Icons.sd_card_outlined,
         onTap: widget.onOpenExternal,
         percent: extPercent,
         usageText: extUsed,

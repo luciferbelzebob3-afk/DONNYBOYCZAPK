@@ -45,14 +45,18 @@ class IrSearchField extends StatelessWidget {
             horizontal: 12,
             vertical: 10,
           ),
-          prefixIcon: Icon(Icons.search, color: colors.textMuted),
+          prefixIcon: Icon(Icons.search_outlined, color: colors.textMuted),
           suffixIcon: ValueListenableBuilder<TextEditingValue>(
             valueListenable: controller,
             builder: (context, value, _) {
               if (value.text.isEmpty) return const SizedBox.shrink();
               return IconButton(
                 tooltip: context.l10n.commonClear,
-                icon: Icon(Icons.close, color: colors.textMuted, size: 18),
+                icon: Icon(
+                  Icons.close_outlined,
+                  color: colors.textMuted,
+                  size: 18,
+                ),
                 onPressed: () {
                   controller.clear();
                   onChanged?.call('');

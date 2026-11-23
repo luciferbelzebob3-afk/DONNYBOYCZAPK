@@ -254,7 +254,7 @@ class _SeedPageState extends State<SeedPage> {
                         color: colors.onAccent,
                       ),
                     )
-                  : const Icon(Icons.refresh),
+                  : const Icon(Icons.refresh_outlined),
             ),
           ],
         ),
@@ -541,7 +541,7 @@ class _ResultCard extends StatelessWidget {
               // text, not the button - draws wider than the pill behind it.
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            icon: const Icon(Icons.save_alt, size: 18),
+            icon: const Icon(Icons.save_alt_outlined, size: 18),
             label: Text(
               l10n.seedSave,
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -630,7 +630,7 @@ class _CaptureList extends StatelessWidget {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.delete_outline),
+                  : const Icon(Icons.delete_outline_outlined),
             ),
           ),
       ],

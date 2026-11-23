@@ -896,9 +896,9 @@ class _FileManagerPageState extends State<FileManagerPage>
             leading: Icon(
               active
                   ? (_ctrl.sortAscending
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward)
-                  : Icons.sort,
+                        ? Icons.arrow_upward_outlined
+                        : Icons.arrow_downward_outlined)
+                  : Icons.sort_outlined,
               color: active ? colors.accent : colors.textMuted,
             ),
             title: Text(
@@ -1099,7 +1099,7 @@ class _FileManagerPageState extends State<FileManagerPage>
                   ? null
                   : selectionMode
                   ? IconButton(
-                      icon: const Icon(Icons.close),
+                      icon: const Icon(Icons.close_outlined),
                       onPressed: exitSelection,
                     )
                   : BackButton(onPressed: _handleBackButton),
@@ -1193,7 +1193,7 @@ class _FileManagerPageState extends State<FileManagerPage>
                     backgroundColor: accent,
                     foregroundColor: colors.onAccent,
                     onPressed: _showFabMenu,
-                    child: const Icon(Icons.add),
+                    child: const Icon(Icons.add_outlined),
                   ),
           );
         },
@@ -1273,7 +1273,7 @@ class _FileManagerPageState extends State<FileManagerPage>
     final actions = <ActionItem>[
       if (items.length == 1 && _ctrl.viewMode == FileViewMode.list)
         ActionItem(
-          icon: Icons.drive_file_rename_outline,
+          icon: Icons.drive_file_rename_outline_outlined,
           label: context.l10n.fmRename,
           onTap: _renameSelected,
         ),
@@ -1301,7 +1301,7 @@ class _FileManagerPageState extends State<FileManagerPage>
           onTap: _indexFapIconsSelected,
         ),
       ActionItem(
-        icon: Icons.delete_outline,
+        icon: Icons.delete_outline_outlined,
         label: context.l10n.commonDelete,
         destructive: true,
         onTap: _deleteSelected,
@@ -1354,7 +1354,9 @@ class _FileManagerPageState extends State<FileManagerPage>
     for (var i = 0; i < segments.length; i++) {
       cumulative += '/${segments[i]}';
       final isLast = i == segments.length - 1;
-      crumbs.add(Icon(Icons.chevron_right, size: 16, color: colors.textMuted));
+      crumbs.add(
+        Icon(Icons.chevron_right_outlined, size: 16, color: colors.textMuted),
+      );
       crumbs.add(
         chip(
           Text(
@@ -1407,7 +1409,7 @@ class _FileManagerPageState extends State<FileManagerPage>
       child: Row(
         children: [
           Icon(
-            cb.isCut ? Icons.content_cut : Icons.content_copy,
+            cb.isCut ? Icons.content_cut_outlined : Icons.content_copy_outlined,
             size: 14,
             color: colors.accent,
           ),
@@ -1438,7 +1440,7 @@ class _FileManagerPageState extends State<FileManagerPage>
             ),
           ),
           IconButton(
-            icon: Icon(Icons.close, size: 15, color: colors.textMuted),
+            icon: Icon(Icons.close_outlined, size: 15, color: colors.textMuted),
             onPressed: () => setState(() => _clipboard = null),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1455,7 +1457,7 @@ class _FileManagerPageState extends State<FileManagerPage>
     }
     if (!_ctrl.client.isConnected) {
       return ArchiveEmptyView(
-        icon: Icons.link_off,
+        icon: Icons.link_off_outlined,
         title: context.l10n.fmNotConnected,
         subtitle: context.l10n.fmNotConnectedHint,
         actionLabel: context.l10n.commonConnect,
@@ -1464,7 +1466,7 @@ class _FileManagerPageState extends State<FileManagerPage>
     }
     if (_ctrl.error != null && entries.isEmpty) {
       return ArchiveEmptyView(
-        icon: Icons.error_outline,
+        icon: Icons.error_outline_outlined,
         title: _ctrl.error!,
         actionLabel: context.l10n.commonRetry,
         onAction: _ctrl.refresh,
@@ -1585,7 +1587,7 @@ class _FileManagerPageState extends State<FileManagerPage>
   Widget _buildEmptyState() {
     final searching = _ctrl.isSearching;
     return ArchiveEmptyView(
-      icon: searching ? Icons.search_off : Icons.folder_open,
+      icon: searching ? Icons.search_off_outlined : Icons.folder_open_outlined,
       title: searching ? context.l10n.fmNoMatches : context.l10n.fmEmptyFolder,
       subtitle: searching ? null : context.l10n.fmEmptyHint,
       actionLabel: searching

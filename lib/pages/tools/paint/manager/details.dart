@@ -356,7 +356,7 @@ class _SheetSummary extends StatelessWidget {
           _OpenButton(colors: colors, onTap: onOpen),
           IconButton(
             onPressed: onClose,
-            icon: Icon(Icons.close, size: 18, color: colors.textMuted),
+            icon: Icon(Icons.close_outlined, size: 18, color: colors.textMuted),
             tooltip: context.l10n.commonClose,
             style: IconButton.styleFrom(
               minimumSize: const Size.square(32),

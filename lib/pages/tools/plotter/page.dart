@@ -283,7 +283,11 @@ class _PulsePlotterPageState extends State<PulsePlotterPage> {
                             color: colors.accent,
                           ),
                         )
-                      : Icon(Icons.show_chart, size: 38, color: colors.accent),
+                      : Icon(
+                          Icons.show_chart_outlined,
+                          size: 38,
+                          color: colors.accent,
+                        ),
                 ),
                 const SizedBox(height: 18),
                 Text(

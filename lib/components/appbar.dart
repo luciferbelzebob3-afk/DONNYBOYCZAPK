@@ -59,9 +59,9 @@ class QPageAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final foreground = foregroundColor ?? colors.onAccent;
+    final foreground = foregroundColor ?? colors.textPrimary;
 
-    final background = backgroundColor ?? colors.accent;
+    final background = backgroundColor ?? colors.background;
 
     return AppBar(
       toolbarHeight: toolbarHeight,
@@ -72,7 +72,8 @@ class QPageAppBar extends StatelessWidget implements PreferredSizeWidget {
       elevation: elevation,
       scrolledUnderElevation: elevation,
       centerTitle: centerTitle,
-      titleSpacing: 0,
+      titleSpacing: 12,
+      shape: Border(bottom: BorderSide(color: colors.divider)),
       leading: leading,
       actions: actions,
       bottom: bottom,

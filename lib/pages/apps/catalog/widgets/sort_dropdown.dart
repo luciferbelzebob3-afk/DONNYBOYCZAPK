@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import '../../../../services/localization/l10n.dart';
 import '../../../../theme/theme.dart';
@@ -58,7 +58,11 @@ class SortDropdown extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              Icon(Icons.arrow_drop_down, color: colors.onAccent, size: 22),
+              Icon(
+                Icons.arrow_drop_down_outlined,
+                color: colors.onAccent,
+                size: 22,
+              ),
             ],
           ),
         ),

@@ -1,5 +1,6 @@
 import 'package:flipperlib/flipperlib.dart' hide DateTime, File;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../pages/devices/controllers/device.dart';
 import '../pages/devices/device_scope.dart';
@@ -11,7 +12,6 @@ import '../services/telemetry/settings.dart';
 import '../services/localization/l10n.dart';
 import '../theme/theme.dart';
 import 'shell.dart';
-import '../pages/about/page.dart';
 
 class QUnleashedApp extends StatefulWidget {
   const QUnleashedApp({
@@ -72,6 +72,19 @@ class _QUnleashedAppState extends State<QUnleashedApp> {
       widget.device ?? DeviceController(client: widget.client);
 
   @override
+  void initState() {
+    super.initState();
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.black,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    );
+  }
+
+  @override
   void dispose() {
     // Only what this built. A controller handed in belongs to whoever handed
     // it over, and tearing down someone else's fixture from here is how a
@@ -118,7 +131,7 @@ class _QUnleashedAppState extends State<QUnleashedApp> {
               ),
             ),
           ),
-          home: AboutPage(devicePage: AppShell(client: widget.client)),
+          home: AppShell(client: widget.client),
         );
       },
     );

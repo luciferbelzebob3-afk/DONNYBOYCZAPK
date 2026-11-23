@@ -253,12 +253,13 @@ String _inputLabel(BuildContext context, MediaRemoteInput input) =>
 
 IconData _inputIcon(MediaRemoteInput input) => switch (input) {
   MediaRemoteInput.previous ||
-  MediaRemoteInput.doublePrevious => Icons.skip_previous,
+  MediaRemoteInput.doublePrevious => Icons.skip_previous_outlined,
   MediaRemoteInput.playPause ||
-  MediaRemoteInput.doublePlayPause => Icons.play_arrow,
-  MediaRemoteInput.next || MediaRemoteInput.doubleNext => Icons.skip_next,
-  MediaRemoteInput.volumeUp => Icons.volume_up,
-  MediaRemoteInput.volumeDown => Icons.volume_down,
+  MediaRemoteInput.doublePlayPause => Icons.play_arrow_outlined,
+  MediaRemoteInput.next ||
+  MediaRemoteInput.doubleNext => Icons.skip_next_outlined,
+  MediaRemoteInput.volumeUp => Icons.volume_up_outlined,
+  MediaRemoteInput.volumeDown => Icons.volume_down_outlined,
 };
 
 String _buttonLabel(BuildContext context, RemoteButton button) =>

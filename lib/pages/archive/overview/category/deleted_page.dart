@@ -155,7 +155,7 @@ class _DeletedPageState extends State<DeletedPage>
     final actions = <ActionItem>[
       if (_ctrl.isConnected)
         ActionItem(
-          icon: Icons.restore,
+          icon: Icons.restore_outlined,
           label: context.l10n.archiveRestore,
           onTap: _bulkRestore,
         ),
@@ -177,7 +177,11 @@ class _DeletedPageState extends State<DeletedPage>
           color: colors.accent.withValues(alpha: 0.16),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(Icons.delete_outline, color: colors.accent, size: 22),
+        child: Icon(
+          Icons.delete_outline_outlined,
+          color: colors.accent,
+          size: 22,
+        ),
       ),
       title: context.l10n.archiveFilesSelected(keys.length),
       subtitle: context.l10n.archiveDeleted,
@@ -188,9 +192,9 @@ class _DeletedPageState extends State<DeletedPage>
   bool get _hasFilter => _filterVal != null || _query.isNotEmpty;
 
   IconData _emptyIcon() {
-    if (_hasFilter) return Icons.search_off;
-    if (!_ctrl.isConnected) return Icons.link_off;
-    return Icons.delete_outline;
+    if (_hasFilter) return Icons.search_off_outlined;
+    if (!_ctrl.isConnected) return Icons.link_off_outlined;
+    return Icons.delete_outline_outlined;
   }
 
   /// One row. Built against the page's `context`, never a row's: the actions
@@ -333,7 +337,11 @@ class _DeletedAppBarTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.delete_outline, color: Colors.white, size: 18),
+        const Icon(
+          Icons.delete_outline_outlined,
+          color: Colors.white,
+          size: 18,
+        ),
         const SizedBox(width: 8),
         Text(
           context.l10n.archiveDeleted,

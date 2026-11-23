@@ -38,7 +38,9 @@ class BatterySummaryCard extends StatelessWidget {
 
     return SummaryCard(
       title: context.l10n.cardBattery,
-      icon: charging ? Icons.battery_charging_full : Icons.battery_full,
+      icon: charging
+          ? Icons.battery_charging_full_outlined
+          : Icons.battery_full_outlined,
       mainValue: charge,
       barValue: charge != null ? charge / 100 : null,
       barColor: charge == null ? null : colors.accent,

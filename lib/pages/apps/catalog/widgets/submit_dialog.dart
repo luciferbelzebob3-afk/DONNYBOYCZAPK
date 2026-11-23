@@ -63,7 +63,7 @@ class SubmitAppDialog extends StatelessWidget {
                     ),
                     IconButton(
                       icon: Icon(
-                        Icons.close,
+                        Icons.close_outlined,
                         color: colors.textMuted,
                         size: 20,
                       ),
@@ -92,13 +92,13 @@ class SubmitAppDialog extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 _SubmitOption(
-                  icon: Icons.extension,
+                  icon: Icons.extension_outlined,
                   color: _firmwareColor('unlshd'),
                   title: context.l10n.submitUnleashedTitle,
                   subtitle: 'all-the-plugins',
                   text: context.l10n.submitUnleashedText,
                   actionLabel: context.l10n.submitUnleashedAction,
-                  actionIcon: Icons.add_circle_outline,
+                  actionIcon: Icons.add_circle_outline_outlined,
                   onAction: () => openUrl(context, kAtpNewAppUrl),
                 ),
               ],

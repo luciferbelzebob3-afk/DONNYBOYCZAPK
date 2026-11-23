@@ -146,14 +146,18 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
         hintStyle: TextStyle(color: colors.textMuted, fontSize: 13),
         filled: true,
         fillColor: colors.card,
-        prefixIcon: Icon(Icons.link, size: 20, color: colors.textMuted),
+        prefixIcon: Icon(
+          Icons.link_outlined,
+          size: 20,
+          color: colors.textMuted,
+        ),
         suffixIcon: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
               tooltip: context.l10n.fliblerPasteAndLoad,
               icon: Icon(
-                Icons.content_paste_go,
+                Icons.content_paste_go_outlined,
                 size: 20,
                 color: colors.textSecondary,
               ),
@@ -162,7 +166,7 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
             IconButton(
               tooltip: context.l10n.fliblerChooseFolder,
               icon: Icon(
-                Icons.folder_open,
+                Icons.folder_open_outlined,
                 size: 20,
                 color: colors.textSecondary,
               ),
@@ -343,13 +347,13 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
           ),
           const SizedBox(width: 12),
           _SquareAction(
-            icon: Icons.upload,
+            icon: Icons.upload_outlined,
             tooltip: context.l10n.fliblerSendAgain,
             onTap: () => _ctrl.sendToDevice(),
           ),
           const SizedBox(width: 8),
           _SquareAction(
-            icon: Icons.refresh,
+            icon: Icons.refresh_outlined,
             tooltip: context.l10n.fliblerRebuild,
             onTap: _build,
           ),
@@ -370,7 +374,7 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
           ),
           const SizedBox(width: 12),
           _SquareAction(
-            icon: Icons.refresh,
+            icon: Icons.refresh_outlined,
             tooltip: context.l10n.fliblerRebuild,
             onTap: _build,
           ),
@@ -424,7 +428,7 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
         Icon(
           entry.kind == FliblerSourceKind.folder
               ? Icons.folder_outlined
-              : Icons.link,
+              : Icons.link_outlined,
           size: 20,
           color: colors.textSecondary,
         ),
@@ -463,7 +467,7 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
         const SizedBox(width: 8),
         IconButton(
           tooltip: context.l10n.fliblerRemoveRecent,
-          icon: Icon(Icons.close, size: 16, color: colors.textMuted),
+          icon: Icon(Icons.close_outlined, size: 16, color: colors.textMuted),
           onPressed: () => _ctrl.removeRecent(entry),
         ),
       ],
@@ -489,7 +493,7 @@ class _FliblerProjectPageState extends State<FliblerProjectPage> {
             actions: [
               QPageAppBarAction(
                 tooltip: context.l10n.fliblerConsoleTab,
-                icon: const Icon(Icons.terminal),
+                icon: const Icon(Icons.terminal_outlined),
                 onPressed: _openConsole,
               ),
               QPageAppBarAction(

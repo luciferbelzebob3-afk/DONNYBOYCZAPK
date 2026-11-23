@@ -265,12 +265,12 @@ class _TextEditorPageState extends State<TextEditorPage> {
             QPageAppBarAction(
               tooltip: context.l10n.editorRun,
               onPressed: _loading ? null : widget.onRun,
-              icon: const Icon(Icons.play_arrow),
+              icon: const Icon(Icons.play_arrow_outlined),
             ),
           QPageAppBarAction(
             tooltip: context.l10n.findFind,
             onPressed: (_loading || !_hasContent) ? null : _toggleFind,
-            icon: const Icon(Icons.search),
+            icon: const Icon(Icons.search_outlined),
           ),
           QPageAppBarAction(
             tooltip: _mode == EditorMode.hex
@@ -295,7 +295,7 @@ class _TextEditorPageState extends State<TextEditorPage> {
                       strokeWidth: 2,
                     ),
                   )
-                : const Icon(Icons.save),
+                : const Icon(Icons.save_outlined),
           ),
         ],
       ),

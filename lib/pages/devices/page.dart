@@ -70,8 +70,8 @@ class DeviceTab extends StatelessWidget {
           deviceInfo: ctrl.info,
           connectionLabel: ctrl.device?.isBle == true ? 'BLE' : 'USB',
           connectionIcon: ctrl.device?.isBle == true
-              ? Icons.bluetooth
-              : Icons.usb,
+              ? Icons.bluetooth_outlined
+              : Icons.usb_outlined,
           onOpenFullInfo: ctrl.isConnected
               ? () => _openFullInfo(context)
               : null,

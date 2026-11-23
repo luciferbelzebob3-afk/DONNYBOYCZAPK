@@ -525,13 +525,13 @@ class _RemoteControlPageState extends State<RemoteControlPage>
                   title: context.l10n.remoteControlTitle,
                   leading: IconButton(
                     onPressed: _close,
-                    icon: const Icon(Icons.arrow_back),
+                    icon: const Icon(Icons.arrow_back_outlined),
                   ),
                   actions: [
                     IconButton(
                       tooltip: context.l10n.connectSearch,
                       onPressed: _onConnection,
-                      icon: const Icon(Icons.search),
+                      icon: const Icon(Icons.search_outlined),
                     ),
                     if (_mediaRemote.supported)
                       IconButton(

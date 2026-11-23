@@ -35,7 +35,9 @@ class FramesSection extends StatelessWidget {
         children: [
           const SizedBox(width: 12),
           _SideButton(
-            icon: ctrl.isPlaying ? Icons.stop : Icons.play_arrow,
+            icon: ctrl.isPlaying
+                ? Icons.stop_outlined
+                : Icons.play_arrow_outlined,
             colors: colors,
             enabled: canPlay,
             onTap: ctrl.togglePlay,
@@ -52,7 +54,7 @@ class FramesSection extends StatelessWidget {
             ),
           ),
           _SideButton(
-            icon: Icons.add,
+            icon: Icons.add_outlined,
             colors: colors,
             onTap: ctrl.addFrame,
             tooltip: null,
@@ -162,7 +164,7 @@ class FrameActions extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _ActionButton(
-              icon: Icons.delete_outline,
+              icon: Icons.delete_outline_outlined,
               label: context.l10n.commonDelete,
               colors: colors,
               color: colors.danger,
@@ -314,7 +316,10 @@ class _FramesStripState extends State<FramesStrip> {
         ),
         PopupMenuItem(
           value: 1,
-          child: MenuLine(icon: Icons.delete_outline, label: l10n.commonDelete),
+          child: MenuLine(
+            icon: Icons.delete_outline_outlined,
+            label: l10n.commonDelete,
+          ),
         ),
       ],
     );

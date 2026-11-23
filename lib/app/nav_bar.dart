@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../components/sensitive_surface.dart';
+import '../components/donny_icons.dart';
 import '../services/localization/l10n.dart';
 import '../theme/theme.dart';
 
@@ -107,7 +108,12 @@ class FlipperRootScaffold extends StatelessWidget {
       backgroundColor: colors.background,
       body: child,
       bottomNavigationBar: Container(
-        color: colors.card,
+        margin: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+        decoration: BoxDecoration(
+          color: colors.card,
+          border: Border.all(color: colors.divider),
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: SafeArea(
           top: false,
           child: Padding(
@@ -238,6 +244,8 @@ class FlipperRailIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final branded = donnyIconFor(asset);
+    if (branded != null) return Icon(branded, size: size, color: color);
     return SvgPicture.asset(
       asset,
       width: size,
@@ -317,11 +325,13 @@ class _BottomTab extends StatelessWidget with VisibleSurface {
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final color = selected ? colors.textPrimary : colors.textMuted;
+    final color = selected ? colors.accent : colors.textSecondary;
     final announcement = announce;
     return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      color: selected
+          ? colors.accent.withValues(alpha: 0.10)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -335,6 +345,12 @@ class _BottomTab extends StatelessWidget with VisibleSurface {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(width: 42, height: 24, child: icon),
+                const SizedBox(height: 6),
+                Container(
+                  height: 2,
+                  width: 18,
+                  color: selected ? colors.accent : Colors.transparent,
+                ),
                 const SizedBox(height: 4),
                 TabLabel(label: label, color: color),
               ],
@@ -574,6 +590,9 @@ class _NavIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final branded = donnyIconFor(asset);
+    if (branded != null)
+      return Icon(branded, size: 23, color: context.appColors.textSecondary);
     return SvgPicture.asset(
       asset,
       colorFilter: ColorFilter.mode(

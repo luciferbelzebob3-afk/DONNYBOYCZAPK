@@ -243,7 +243,11 @@ class AlertTile extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, size: 18, color: colors.textMuted),
+            Icon(
+              Icons.chevron_right_outlined,
+              size: 18,
+              color: colors.textMuted,
+            ),
           ],
         ),
       ),
@@ -319,7 +323,7 @@ class NumberStepper extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           StepButton(
-            icon: Icons.remove,
+            icon: Icons.remove_outlined,
             enabled: enabled && value > min,
             colors: colors,
             onTap: () => onChange((value - step).clamp(min, max)),
@@ -337,7 +341,7 @@ class NumberStepper extends StatelessWidget {
             ),
           ),
           StepButton(
-            icon: Icons.add,
+            icon: Icons.add_outlined,
             enabled: enabled && value < max,
             colors: colors,
             onTap: () => onChange((value + step).clamp(min, max)),

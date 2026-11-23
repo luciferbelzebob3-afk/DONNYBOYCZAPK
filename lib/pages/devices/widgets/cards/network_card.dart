@@ -18,7 +18,7 @@ class NetworkSummaryCard extends StatelessWidget {
         final host = traffic.host;
         return DashboardCard(
           title: context.l10n.cardNetwork,
-          icon: Icons.public,
+          icon: Icons.public_outlined,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

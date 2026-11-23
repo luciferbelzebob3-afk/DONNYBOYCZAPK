@@ -60,7 +60,11 @@ class DeviceInfoCard extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.only(right: 10),
-                      child: Icon(Icons.copy, color: colors.accent, size: 20),
+                      child: Icon(
+                        Icons.copy_outlined,
+                        color: colors.accent,
+                        size: 20,
+                      ),
                     ),
                     Expanded(
                       child: Text(

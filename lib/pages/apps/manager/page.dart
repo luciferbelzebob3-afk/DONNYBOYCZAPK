@@ -175,7 +175,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
         if (busy)
           AppActionEntry(
             label: ctx.l10n.commonCancel,
-            icon: Icons.close,
+            icon: Icons.close_outlined,
             color: colors.danger,
             filled: true,
             onTap: () => _engine.cancel(app.alias),
@@ -193,7 +193,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
         else if (app.isMissingFromDevice) ...[
           AppActionEntry(
             label: ctx.l10n.appActionRestore,
-            icon: Icons.restore,
+            icon: Icons.restore_outlined,
             color: colors.accent,
             filled: true,
             onTap: () => unawaited(
@@ -214,7 +214,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
           ),
           AppActionEntry(
             label: ctx.l10n.appActionUninstall,
-            icon: Icons.delete_outline,
+            icon: Icons.delete_outline_outlined,
             color: colors.danger,
             half: true,
             onTap: () => unawaited(
@@ -225,7 +225,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
           if (updatable)
             AppActionEntry(
               label: ctx.l10n.commonUpdate,
-              icon: Icons.system_update_alt,
+              icon: Icons.system_update_alt_outlined,
               color: colors.success,
               filled: true,
               onTap: () => unawaited(
@@ -243,7 +243,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
           ),
           AppActionEntry(
             label: ctx.l10n.appActionRestore,
-            icon: Icons.restore,
+            icon: Icons.restore_outlined,
             color: colors.accent,
             half: true,
             onTap: () => unawaited(
@@ -264,7 +264,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
           ),
           AppActionEntry(
             label: ctx.l10n.appActionUninstall,
-            icon: Icons.delete_outline,
+            icon: Icons.delete_outline_outlined,
             color: colors.danger,
             filled: true,
             half: true,
@@ -306,7 +306,11 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
             titleSpacing: 16,
             title: Row(
               children: [
-                const Icon(Icons.manage_search, color: Colors.white, size: 18),
+                const Icon(
+                  Icons.manage_search_outlined,
+                  color: Colors.white,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
@@ -335,7 +339,10 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
                     backgroundColor: _updates.failed
                         ? Colors.amber.shade700
                         : null,
-                    child: const Icon(Icons.update, color: Colors.white),
+                    child: const Icon(
+                      Icons.update_outlined,
+                      color: Colors.white,
+                    ),
                   ),
                   tooltip: _updates.failed
                       ? context.l10n.appsLoadFailed
@@ -350,7 +357,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
                       : _updateAll,
                 ),
               IconButton(
-                icon: const Icon(Icons.extension, color: Colors.white),
+                icon: const Icon(Icons.extension_outlined, color: Colors.white),
                 tooltip: context.l10n.managerPluginsTooltip,
                 onPressed: widget.onOpenPlugins,
               ),
@@ -401,7 +408,7 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
     final colors = context.appColors;
     if (!_backend.isReady && all.isEmpty) {
       return ArchiveEmptyView(
-        icon: Icons.usb_off,
+        icon: Icons.usb_off_outlined,
         title: context.l10n.managerConnectDevice,
         subtitle: context.l10n.managerConnectHint,
       );
@@ -474,7 +481,9 @@ class _AppsManagerPageState extends State<AppsManagerPage> {
             // A read that came back short is not a Flipper with no apps on
             // it, and this screen rendered the same thing for both. #112.
             child: ArchiveEmptyView(
-              icon: _readFailed ? Icons.cloud_off : Icons.apps,
+              icon: _readFailed
+                  ? Icons.cloud_off_outlined
+                  : Icons.apps_outlined,
               title: _filtering
                   ? context.l10n.appsNothingMatches
                   : _readFailed
@@ -606,7 +615,11 @@ class _ScanProgress extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
           child: Row(
             children: [
-              Icon(Icons.folder_open, size: 14, color: colors.textMuted),
+              Icon(
+                Icons.folder_open_outlined,
+                size: 14,
+                color: colors.textMuted,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(

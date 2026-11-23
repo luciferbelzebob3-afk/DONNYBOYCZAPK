@@ -91,7 +91,10 @@ class FlipperPageCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 14),
       child: Material(
         color: colors.card,
-        borderRadius: BorderRadius.circular(10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(color: colors.divider),
+        ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           children: [

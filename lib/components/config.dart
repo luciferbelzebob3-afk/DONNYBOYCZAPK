@@ -16,28 +16,6 @@ class QAppConfig {
           tertiary: Color(0xFFFFB347),
         ),
       ),
-      FirmwareEntry(
-        name: 'Unleashed',
-        shortName: 'unlshd',
-        icon: 'cfw.png',
-        matchKeywords: ['unleashed', 'darkflippers'],
-        colors: FirmwareColors(
-          primary: Color(0xFFCC241D),
-          secondary: Color(0xFFCC5F00),
-          tertiary: Color(0xFFFFB347),
-        ),
-      ),
-      FirmwareEntry(
-        name: 'Oficiální firmware',
-        shortName: 'ofw',
-        icon: 'ofw.png',
-        matchKeywords: ['official', 'flipperdevices'],
-        colors: FirmwareColors(
-          primary: Color(0xFFFF8200),
-          secondary: Color(0xFFCC5F00),
-          tertiary: Color(0xFFFFD580),
-        ),
-      ),
     ],
   );
 
@@ -71,7 +49,9 @@ class FirmwareEntry {
     required this.colors,
   });
 
-  String get assetPath => 'assets/img/firmware/$icon';
+  String get assetPath => shortName == 'donnyboy'
+      ? 'assets/img/donnyboy_icon.png'
+      : 'assets/img/firmware/$icon';
 }
 
 class FirmwareConfig {

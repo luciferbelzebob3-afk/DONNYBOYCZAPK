@@ -42,8 +42,11 @@ class FirmwareController extends ChangeNotifier {
 
   String selectedChannelId(FirmwareEntry entry) {
     final selected = _selections[entry.shortName]?.channelId;
-    if (selected != null && selected.isNotEmpty) return selected;
-    return kCustomFirmwareChannelId;
+    return selected == null ||
+            selected.isEmpty ||
+            selected == kCustomFirmwareChannelId
+        ? 'release'
+        : selected;
   }
 
   UnleashedVariant selectedVariant(FirmwareEntry entry) =>
@@ -74,6 +77,7 @@ class FirmwareController extends ChangeNotifier {
   void ensureDirectory(FirmwareEntry entry) => _repo.ensure(entry);
 
   void setChannel(FirmwareEntry entry, String channelId) {
+    if (!channelsFor(entry).any((channel) => channel.id == channelId)) return;
     final selection = _selectionFor(entry.shortName);
     selection.channelId = channelId;
     selection.channelPicked = true;
@@ -151,14 +155,13 @@ class FirmwareController extends ChangeNotifier {
   void _applyChannelFallback(FirmwareEntry entry) {
     final selection = _selectionFor(entry.shortName);
     final directory = _repo.directoryFor(entry);
-    // Nothing has been fetched yet, so the only channel on offer is the custom
-    // one. A remembered channel cannot be checked against that, and replacing
-    // it here is a decision the directory's arrival can never undo: the
-    // replacement counts as picked, which is exactly what stops the clause
-    // below from correcting it. The directory cache is in-memory only, so this
-    // is every cold start, not an edge case.
-    if (directory == null && selection.channelId != null) return;
     final channels = _channelsForDirectory(directory);
+    if (channels.isEmpty) {
+      if (selection.channelId == kCustomFirmwareChannelId) {
+        selection.channelId = 'release';
+      }
+      return;
+    }
     final selected = selection.channelId;
     final match = _matchChannel(channels, selected);
     final hasReal = channels.any((c) => c.id != kCustomFirmwareChannelId);
@@ -207,7 +210,9 @@ class FirmwareController extends ChangeNotifier {
     final real = (dir?.channels ?? const <FirmwareDirectoryChannel>[])
         .where((channel) => channel.hasVersions)
         .toList();
-    return [...real, buildCustomChannel()];
+    return real
+        .where((channel) => channel.id != kCustomFirmwareChannelId)
+        .toList();
   }
 
   bool _supportsVariantSelection(FirmwareEntry entry, String channelId) {

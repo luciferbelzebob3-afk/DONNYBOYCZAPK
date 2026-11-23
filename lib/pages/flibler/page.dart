@@ -54,7 +54,10 @@ class AssemblerConsolePage extends StatelessWidget {
           ),
           IconButton(
             tooltip: context.l10n.fliblerClearLog,
-            icon: Icon(Icons.delete_outline, color: colors.textPrimary),
+            icon: Icon(
+              Icons.delete_outline_outlined,
+              color: colors.textPrimary,
+            ),
             onPressed: controller.clearLog,
           ),
         ],

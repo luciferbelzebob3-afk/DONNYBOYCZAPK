@@ -181,7 +181,11 @@ class _SelectionCheck extends StatelessWidget {
         color: colors.accent,
         border: Border.all(color: colors.card, width: 2),
       ),
-      child: Icon(Icons.check, size: _size * 0.6, color: colors.onAccent),
+      child: Icon(
+        Icons.check_outlined,
+        size: _size * 0.6,
+        color: colors.onAccent,
+      ),
     );
   }
 }
@@ -336,22 +340,24 @@ class FileActionsSheet {
         (actions.onRename != null
             ? () => actions.onRename!.call(entry.name)
             : null);
-    add(Icons.drive_file_rename_outline, l10n.fmRename, renameTap);
+    add(Icons.drive_file_rename_outline_outlined, l10n.fmRename, renameTap);
     add(Icons.copy_outlined, l10n.fmCopy, actions.onCopy);
     add(Icons.drive_file_move_outlined, l10n.fmMove, actions.onCut);
     add(Icons.download_outlined, l10n.fmDownload, actions.onDownload);
     add(Icons.image_outlined, l10n.fmIndexIcon, actions.onIndexIcon);
-    add(Icons.play_arrow, l10n.fileEmulate, actions.onEmulate);
-    add(Icons.edit_note, l10n.fileEdit, actions.onEdit);
+    add(Icons.play_arrow_outlined, l10n.fileEmulate, actions.onEmulate);
+    add(Icons.edit_note_outlined, l10n.fileEdit, actions.onEdit);
     if (!isDir) {
       add(
-        isShareSupported ? Icons.ios_share : Icons.content_copy,
+        isShareSupported
+            ? Icons.ios_share_outlined
+            : Icons.content_copy_outlined,
         isShareSupported ? l10n.shareShare : l10n.fileClipboard,
         actions.onShare,
       );
     }
     add(
-      Icons.delete_outline,
+      Icons.delete_outline_outlined,
       l10n.commonDelete,
       actions.onDelete,
       destructive: true,

@@ -199,7 +199,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
         if (busy)
           AppActionEntry(
             label: ctx.l10n.commonCancel,
-            icon: Icons.close,
+            icon: Icons.close_outlined,
             color: colors.danger,
             filled: true,
             onTap: () => _engine.cancel(entry.appId),
@@ -207,7 +207,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
         else if (action == PackAction.install)
           AppActionEntry(
             label: ctx.l10n.commonInstall,
-            icon: Icons.download,
+            icon: Icons.download_outlined,
             color: colors.accent,
             filled: true,
             onTap: () => _engine.installOrUpdate(card),
@@ -216,7 +216,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
           if (action == PackAction.update)
             AppActionEntry(
               label: ctx.l10n.commonUpdate,
-              icon: Icons.arrow_upward,
+              icon: Icons.arrow_upward_outlined,
               color: colors.success,
               filled: true,
               onTap: () => _engine.installOrUpdate(card),
@@ -224,7 +224,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
           else if (action == PackAction.downgrade)
             AppActionEntry(
               label: ctx.l10n.appActionDowngrade,
-              icon: Icons.arrow_downward,
+              icon: Icons.arrow_downward_outlined,
               color: colors.danger,
               filled: true,
               onTap: () => _engine.installOrUpdate(card),
@@ -241,7 +241,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
           ),
           AppActionEntry(
             label: ctx.l10n.appActionUninstall,
-            icon: Icons.delete_outline,
+            icon: Icons.delete_outline_outlined,
             color: colors.danger,
             half: true,
             onTap: () => unawaited(
@@ -285,7 +285,11 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
             titleSpacing: 16,
             title: Row(
               children: [
-                const Icon(Icons.extension, color: Colors.white, size: 18),
+                const Icon(
+                  Icons.extension_outlined,
+                  color: Colors.white,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 const Text(
                   'All-the-plugins',
@@ -319,7 +323,10 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.manage_search, color: Colors.white),
+                icon: const Icon(
+                  Icons.manage_search_outlined,
+                  color: Colors.white,
+                ),
                 tooltip: context.l10n.catalogManageTooltip,
                 onPressed: widget.onOpenManager,
               ),
@@ -382,7 +389,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
       // #112.
       final failed = !_atp.loading && _atp.failed;
       return ArchiveEmptyView(
-        icon: failed ? Icons.cloud_off : Icons.extension_off,
+        icon: failed ? Icons.cloud_off_outlined : Icons.extension_off_outlined,
         title: _atp.loading
             ? context.l10n.atpReadingRelease
             : failed
@@ -393,7 +400,7 @@ class _AtpInstallPageState extends State<AtpInstallPage> {
     }
     if (visible.isEmpty) {
       return ArchiveEmptyView(
-        icon: Icons.search_off,
+        icon: Icons.search_off_outlined,
         title: context.l10n.appsNothingMatches,
       );
     }

@@ -244,7 +244,7 @@ class _ProjectManagerPageState extends State<ProjectManagerPage> {
         actions: [
           QPageAppBarAction(
             onPressed: _ctrl.busy ? null : () => _openEditor(null),
-            icon: const Icon(Icons.add),
+            icon: const Icon(Icons.add_outlined),
             tooltip: context.l10n.paintNewProject,
           ),
           QPageAppBarAction(
@@ -256,14 +256,16 @@ class _ProjectManagerPageState extends State<ProjectManagerPage> {
           ),
           QPageAppBarAction(
             onPressed: (_ctrl.busy || _ctrl.loading) ? null : _editManifest,
-            icon: const Icon(Icons.edit_note),
+            icon: const Icon(Icons.edit_note_outlined),
             tooltip: context.l10n.paintEditManifest,
           ),
           QPageAppBarAction(
             onPressed: (_ctrl.busy || _ctrl.items.isEmpty)
                 ? null
                 : (_allInPack ? _ctrl.deselectAll : _ctrl.selectAll),
-            icon: Icon(_allInPack ? Icons.deselect : Icons.select_all),
+            icon: Icon(
+              _allInPack ? Icons.deselect_outlined : Icons.select_all_outlined,
+            ),
             tooltip: _allInPack
                 ? context.l10n.paintDeselectAll
                 : context.l10n.paintSelectAll,
@@ -473,7 +475,7 @@ class _ProjectManagerPageState extends State<ProjectManagerPage> {
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: () => _openEditor(null),
-              icon: const Icon(Icons.add),
+              icon: const Icon(Icons.add_outlined),
               label: Text(context.l10n.paintNewProject),
               style: FilledButton.styleFrom(
                 backgroundColor: colors.accent,
@@ -591,7 +593,7 @@ class _AnimationCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       _TileButton(
-                        icon: Icons.delete_outline,
+                        icon: Icons.delete_outline_outlined,
                         colors: colors,
                         tooltip: context.l10n.commonDelete,
                         onTap: enabled ? onDelete : null,
@@ -666,7 +668,7 @@ class _PackToggle extends StatelessWidget {
             border: Border.all(color: on ? colors.accent : colors.divider),
           ),
           child: Icon(
-            on ? Icons.check : Icons.check_box_outline_blank,
+            on ? Icons.check_outlined : Icons.check_box_outline_blank_outlined,
             size: 15,
             color: on ? colors.onAccent : colors.textMuted,
           ),

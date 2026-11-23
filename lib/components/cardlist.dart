@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../theme/theme.dart';
 
-const double kGroupedOuterRadius = 12;
+const double kGroupedOuterRadius = 6;
 const double kGroupedInnerRadius = 4;
-const double kGroupedGap = 3;
+const double kGroupedGap = 8;
 const double kGroupedHorizontalPadding = 14;
-const EdgeInsets kGroupedCardPadding = EdgeInsets.fromLTRB(12, 6, 8, 6);
+const EdgeInsets kGroupedCardPadding = EdgeInsets.fromLTRB(16, 12, 12, 12);
 const double kGroupedGridMaxExtent = 104;
 const double kGroupedGridTileHeight = 104;
 const double kGroupedTitleSize = 12.5;
@@ -61,7 +61,10 @@ class GroupedCard extends StatelessWidget {
     );
     return Material(
       color: colors.card,
-      borderRadius: GroupedCardCorners.of(context),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: colors.divider),
+      ),
       clipBehavior: Clip.antiAlias,
       child: background == null
           ? content

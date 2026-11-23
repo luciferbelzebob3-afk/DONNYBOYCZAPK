@@ -38,7 +38,7 @@ class StorageSummaryCard extends StatelessWidget {
 
     return SummaryCard(
       title: context.l10n.cardStorage,
-      icon: Icons.storage,
+      icon: Icons.storage_outlined,
       mainValue: percent,
       barValue: percent != null ? percent / 100 : null,
       barColor: percent != null && percent > 90 ? colors.danger : colors.accent,

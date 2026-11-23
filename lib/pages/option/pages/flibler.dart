@@ -172,7 +172,7 @@ class _AssemblerSettingsPageState extends State<AssemblerSettingsPage> {
         Padding(
           padding: const EdgeInsets.only(right: 4),
           child: Icon(
-            selected ? Icons.check_circle : Icons.circle_outlined,
+            selected ? Icons.check_circle_outlined : Icons.circle_outlined,
             size: 22,
             color: selected ? colors.accent : colors.textMuted,
           ),

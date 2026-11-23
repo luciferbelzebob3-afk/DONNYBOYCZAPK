@@ -227,7 +227,7 @@ class _DeleteButton extends StatelessWidget {
           width: dim,
           height: dim,
           child: Icon(
-            Icons.delete_outline,
+            Icons.delete_outline_outlined,
             color: colors.danger,
             size: isLarge ? 22 : 18,
           ),

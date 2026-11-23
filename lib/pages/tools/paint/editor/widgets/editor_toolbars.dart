@@ -52,17 +52,17 @@ class EditorAppBar extends StatelessWidget implements PreferredSizeWidget {
       title: context.l10n.paintTitle,
       leading: IconButton(
         onPressed: onClose,
-        icon: const Icon(Icons.arrow_back),
+        icon: const Icon(Icons.arrow_back_outlined),
       ),
       actions: [
         QPageAppBarAction(
           onPressed: ctrl.canUndo ? ctrl.undo : null,
-          icon: const Icon(Icons.undo),
+          icon: const Icon(Icons.undo_outlined),
           tooltip: context.l10n.paintUndo,
         ),
         QPageAppBarAction(
           onPressed: ctrl.canRedo ? ctrl.redo : null,
-          icon: const Icon(Icons.redo),
+          icon: const Icon(Icons.redo_outlined),
           tooltip: context.l10n.paintRedo,
         ),
         QPageAppBarAction(
@@ -118,17 +118,27 @@ List<(DrawTool, IconData, String, Matrix4?)> _drawTools(
   BuildContext context,
 ) => [
   (DrawTool.pencil, Icons.edit_outlined, context.l10n.paintToolPencil, null),
-  (DrawTool.fill, Icons.format_color_fill, context.l10n.paintToolFill, null),
+  (
+    DrawTool.fill,
+    Icons.format_color_fill_outlined,
+    context.l10n.paintToolFill,
+    null,
+  ),
   (
     DrawTool.line,
-    Icons.remove,
+    Icons.remove_outlined,
     context.l10n.paintToolLine,
     Matrix4.rotationZ(-math.pi / 4),
   ),
-  (DrawTool.rect, Icons.crop_square, context.l10n.paintToolRectangle, null),
+  (
+    DrawTool.rect,
+    Icons.crop_square_outlined,
+    context.l10n.paintToolRectangle,
+    null,
+  ),
   (
     DrawTool.ellipse,
-    Icons.radio_button_unchecked,
+    Icons.radio_button_unchecked_outlined,
     context.l10n.paintToolEllipse,
     null,
   ),
@@ -163,7 +173,7 @@ class ToolDock extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 MiniToolButton(
-                  icon: Icons.grid_on,
+                  icon: Icons.grid_on_outlined,
                   active: ctrl.showGrid,
                   colors: colors,
                   onTap: () => ctrl.setShowGrid(!ctrl.showGrid),
@@ -171,7 +181,7 @@ class ToolDock extends StatelessWidget {
                 ),
                 const Spacer(),
                 MiniToolButton(
-                  icon: Icons.zoom_out,
+                  icon: Icons.zoom_out_outlined,
                   active: false,
                   colors: colors,
                   onTap: ctrl.zoomOut,
@@ -179,7 +189,7 @@ class ToolDock extends StatelessWidget {
                 ),
                 ZoomLabel(ctrl: ctrl, colors: colors),
                 MiniToolButton(
-                  icon: Icons.zoom_in,
+                  icon: Icons.zoom_in_outlined,
                   active: false,
                   colors: colors,
                   onTap: ctrl.zoomIn,
@@ -297,14 +307,14 @@ class ToolRail extends StatelessWidget {
               ),
               _Separator(colors: colors),
               MiniToolButton(
-                icon: Icons.grid_on,
+                icon: Icons.grid_on_outlined,
                 active: ctrl.showGrid,
                 colors: colors,
                 onTap: () => ctrl.setShowGrid(!ctrl.showGrid),
                 tooltip: context.l10n.paintToggleGrid,
               ),
               MiniToolButton(
-                icon: Icons.zoom_in,
+                icon: Icons.zoom_in_outlined,
                 active: false,
                 colors: colors,
                 onTap: ctrl.zoomIn,
@@ -312,7 +322,7 @@ class ToolRail extends StatelessWidget {
               ),
               ZoomLabel(ctrl: ctrl, colors: colors),
               MiniToolButton(
-                icon: Icons.zoom_out,
+                icon: Icons.zoom_out_outlined,
                 active: false,
                 colors: colors,
                 onTap: ctrl.zoomOut,
@@ -322,14 +332,14 @@ class ToolRail extends StatelessWidget {
               // Desktop has the room, so the frame operations stay visible
               // instead of hiding behind the phone dock's overflow button.
               MiniToolButton(
-                icon: Icons.flip,
+                icon: Icons.flip_outlined,
                 active: false,
                 colors: colors,
                 onTap: ctrl.flipH,
                 tooltip: context.l10n.paintFlipHorizontal,
               ),
               MiniToolButton(
-                icon: Icons.flip,
+                icon: Icons.flip_outlined,
                 iconTransform: Matrix4.rotationZ(math.pi / 2),
                 active: false,
                 colors: colors,
@@ -337,14 +347,14 @@ class ToolRail extends StatelessWidget {
                 tooltip: context.l10n.paintFlipVertical,
               ),
               MiniToolButton(
-                icon: Icons.contrast,
+                icon: Icons.contrast_outlined,
                 active: false,
                 colors: colors,
                 onTap: ctrl.invert,
                 tooltip: context.l10n.paintInvert,
               ),
               MiniToolButton(
-                icon: Icons.delete_outline,
+                icon: Icons.delete_outline_outlined,
                 active: false,
                 colors: colors,
                 onTap: ctrl.clearFrame,
@@ -419,33 +429,37 @@ class OpsMenu extends StatelessWidget {
       child: PopupMenuButton<int>(
         tooltip: '',
         padding: EdgeInsets.zero,
-        icon: Icon(Icons.more_horiz, size: 18, color: colors.textSecondary),
+        icon: Icon(
+          Icons.more_horiz_outlined,
+          size: 18,
+          color: colors.textSecondary,
+        ),
         itemBuilder: (context) => [
           PopupMenuItem(
             value: 0,
             child: MenuLine(
-              icon: Icons.flip,
+              icon: Icons.flip_outlined,
               label: context.l10n.paintFlipHorizontal,
             ),
           ),
           PopupMenuItem(
             value: 1,
             child: MenuLine(
-              icon: Icons.flip,
+              icon: Icons.flip_outlined,
               label: context.l10n.paintFlipVertical,
             ),
           ),
           PopupMenuItem(
             value: 2,
             child: MenuLine(
-              icon: Icons.contrast,
+              icon: Icons.contrast_outlined,
               label: context.l10n.paintInvert,
             ),
           ),
           PopupMenuItem(
             value: 3,
             child: MenuLine(
-              icon: Icons.delete_outline,
+              icon: Icons.delete_outline_outlined,
               label: context.l10n.commonClear,
             ),
           ),

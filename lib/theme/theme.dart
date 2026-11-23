@@ -54,15 +54,7 @@ class QAppThemeController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Color get accent {
-    final wantDark = isDark;
-    for (final firmware in _config.firmwares) {
-      if (_firmwareIsDark(firmware) == wantDark) {
-        return firmware.colors.primary;
-      }
-    }
-    return _activeFirmware.colors.primary;
-  }
+  Color get accent => const Color(0xFFFF9700);
 
   bool get isDark => brightness == Brightness.dark;
 
@@ -264,12 +256,12 @@ class QAppColors extends ThemeExtension<QAppColors> {
     if (isDark) {
       return QAppColors(
         background: const Color(0xFF000000),
-        card: const Color(0xFF151515),
+        card: const Color(0xFF101216),
         accent: accent,
         textPrimary: const Color(0xFFFFFFFF),
         textSecondary: const Color(0xFFC8C8C8),
-        textMuted: const Color(0xFF6F6F6F),
-        divider: const Color(0xFF2C2C2C),
+        textMuted: const Color(0xFF9298A2),
+        divider: const Color(0xFF303641),
         info: const Color(0xFF589DFF),
         success: const Color(0xFF2ED34A),
         danger: const Color(0xFFE85858),
@@ -277,15 +269,15 @@ class QAppColors extends ThemeExtension<QAppColors> {
         screenBorder: const Color(0xFF000000),
         screenOptionBackground: Color.alphaBlend(
           accent.withValues(alpha: 0.12),
-          const Color(0xFF151515),
+          const Color(0xFF101216),
         ),
         dialogBarrier: const Color(0x8A000000),
         dialogBackground: const Color(0xFF1A1A1A),
-        dialogDivider: const Color(0xFF2C2C2C),
+        dialogDivider: const Color(0xFF303641),
         dialogText: const Color(0xFFFFFFFF),
         dialogMuted: const Color(0xFF8D8D8D),
         terminalBackground: const Color(0xFF090909),
-        terminalHeader: const Color(0xFF151515),
+        terminalHeader: const Color(0xFF101216),
         terminalText: const Color(0xFF90EE90),
         onAccent: onAccent,
         transparent: Colors.transparent,
@@ -468,6 +460,43 @@ ThemeData buildAppTheme(Brightness brightness, Color accent) {
     scaffoldBackgroundColor: colors.background,
     colorScheme: colorScheme,
     dividerColor: colors.divider,
+    fontFamily: 'Roboto',
+    visualDensity: VisualDensity.standard,
+    cardTheme: CardThemeData(
+      color: colors.card,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: colors.divider),
+      ),
+    ),
+    listTileTheme: ListTileThemeData(
+      iconColor: colors.accent,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: colors.card,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+      focusedBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: colors.accent, width: 2),
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: colors.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: colors.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: colors.divider),
+      ),
+    ),
+
     appBarTheme: AppBarTheme(
       backgroundColor: colors.background,
       foregroundColor: colors.textPrimary,
@@ -476,7 +505,7 @@ ThemeData buildAppTheme(Brightness brightness, Color accent) {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -484,7 +513,7 @@ ThemeData buildAppTheme(Brightness brightness, Color accent) {
         foregroundColor: colors.textSecondary,
         side: BorderSide(color: colors.divider),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
     ),
     dialogTheme: DialogThemeData(backgroundColor: colors.dialogBackground),
@@ -496,7 +525,7 @@ ThemeData buildAppTheme(Brightness brightness, Color accent) {
         iconSize: 20,
         minimumSize: const Size.square(40),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: colors.accent),

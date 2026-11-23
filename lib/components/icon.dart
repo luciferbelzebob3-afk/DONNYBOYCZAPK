@@ -1,3 +1,5 @@
+import 'donny_icons.dart';
+
 import 'dart:async';
 import 'dart:ui' as ui;
 
@@ -310,6 +312,10 @@ class _QIconState extends State<QIcon> {
   Widget build(BuildContext context) {
     final size = widget.size;
     final asset = widget.asset;
+    final branded = donnyIconFor(asset);
+    if (branded != null) {
+      return Icon(branded, size: size ?? 24, color: widget.color);
+    }
     final xbm = widget.xbm;
     if (size == null) {
       return SvgPicture.asset(
@@ -510,7 +516,8 @@ class QIconBadge extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(borderRadius),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: iconColor.withValues(alpha: 0.3)),
       ),
       child: asset != null
           ? QIcon(asset: asset!, color: iconColor, size: iconSize)

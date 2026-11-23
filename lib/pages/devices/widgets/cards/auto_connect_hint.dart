@@ -46,7 +46,7 @@ class AutoConnectHintCard extends StatelessWidget {
           child: FlipperPageCard(
             title: context.l10n.fmAutoConnectFailedTitle(failure.name),
             trailing: IconButton(
-              icon: const Icon(Icons.close, size: 20),
+              icon: const Icon(Icons.close_outlined, size: 20),
               color: colors.textSecondary,
               tooltip: context.l10n.commonClose,
               onPressed: links.dismissAutoConnectFailure,

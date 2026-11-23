@@ -80,7 +80,7 @@ class _ConnectActionRow extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           child: Row(
             children: [
-              Icon(Icons.search, size: 24, color: accent),
+              Icon(Icons.search_outlined, size: 24, color: accent),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -172,10 +172,10 @@ class _DeviceRow extends StatelessWidget {
             children: [
               Icon(
                 entry.isUsb
-                    ? (entry.held ? Icons.cable : Icons.usb)
+                    ? (entry.held ? Icons.cable_outlined : Icons.usb_outlined)
                     : entry.held
-                    ? Icons.bluetooth_connected
-                    : Icons.bluetooth,
+                    ? Icons.bluetooth_connected_outlined
+                    : Icons.bluetooth_outlined,
                 size: 24,
                 color: _iconColor(colors),
               ),
@@ -216,7 +216,11 @@ class _DeviceRow extends StatelessWidget {
                   child: InkResponse(
                     onTap: onDisconnect,
                     radius: 18,
-                    child: Icon(Icons.link_off, size: 18, color: colors.danger),
+                    child: Icon(
+                      Icons.link_off_outlined,
+                      size: 18,
+                      color: colors.danger,
+                    ),
                   ),
                 )
               else if (onForget != null)
@@ -225,7 +229,11 @@ class _DeviceRow extends StatelessWidget {
                   child: InkResponse(
                     onTap: onForget,
                     radius: 18,
-                    child: Icon(Icons.close, size: 18, color: colors.textMuted),
+                    child: Icon(
+                      Icons.close_outlined,
+                      size: 18,
+                      color: colors.textMuted,
+                    ),
                   ),
                 ),
             ],

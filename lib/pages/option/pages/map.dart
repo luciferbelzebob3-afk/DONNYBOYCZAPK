@@ -224,7 +224,7 @@ class _MapSettingsPageState extends State<MapSettingsPage> {
           ),
         const SizedBox(width: 8),
         Icon(
-          selected ? Icons.check_circle : Icons.circle_outlined,
+          selected ? Icons.check_circle_outlined : Icons.circle_outlined,
           size: 22,
           color: selected ? colors.accent : colors.textMuted,
         ),
@@ -284,7 +284,7 @@ class _MapSettingsPageState extends State<MapSettingsPage> {
     BuildContext context, {
     required String title,
     required String value,
-    IconData icon = Icons.chevron_right,
+    IconData icon = Icons.chevron_right_outlined,
   }) {
     final colors = context.appColors;
     return Row(
@@ -344,7 +344,7 @@ class _MapSettingsPageState extends State<MapSettingsPage> {
             context,
             title: context.l10n.mapGetKey,
             value: Uri.parse(provider.signupUrl!).host,
-            icon: Icons.open_in_new,
+            icon: Icons.open_in_new_outlined,
           ),
           () => launchUrl(
             Uri.parse(provider.signupUrl!),
@@ -706,7 +706,7 @@ class _StyleTile extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.check,
+                        Icons.check_outlined,
                         size: 12,
                         color: colors.onAccent,
                       ),

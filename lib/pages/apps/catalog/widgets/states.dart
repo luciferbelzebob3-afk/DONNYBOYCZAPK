@@ -15,7 +15,7 @@ class CatalogEmptyView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.apps, size: 48, color: colors.textMuted),
+          Icon(Icons.apps_outlined, size: 48, color: colors.textMuted),
           const SizedBox(height: 8),
           Text(
             failed ? context.l10n.appsLoadFailed : context.l10n.appsNoneFound,
@@ -39,7 +39,7 @@ class AppDetailErrorView extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline, color: colors.danger, size: 48),
+          Icon(Icons.error_outline_outlined, color: colors.danger, size: 48),
           const SizedBox(height: 8),
           Text(
             context.l10n.appLoadFailed,

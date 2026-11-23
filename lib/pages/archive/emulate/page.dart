@@ -243,8 +243,8 @@ class _EmulatePageState extends State<EmulatePage> {
                       onPressed: () {},
                       icon: Icon(
                         _sending
-                            ? Icons.wifi_tethering
-                            : Icons.wifi_tethering_off,
+                            ? Icons.wifi_tethering_outlined
+                            : Icons.wifi_tethering_off_outlined,
                       ),
                       label: Text(
                         _sending
@@ -268,7 +268,7 @@ class _EmulatePageState extends State<EmulatePage> {
                 if (_running)
                   ElevatedButton.icon(
                     onPressed: _stopAndClose,
-                    icon: const Icon(Icons.stop),
+                    icon: const Icon(Icons.stop_outlined),
                     label: Text(context.l10n.emuStop),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: colors.danger,
@@ -322,7 +322,7 @@ class _EmulatePageState extends State<EmulatePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 48, color: colors.danger),
+            Icon(Icons.error_outline_outlined, size: 48, color: colors.danger),
             const SizedBox(height: 12),
             Text(
               _errorMessage(_error),
@@ -337,7 +337,7 @@ class _EmulatePageState extends State<EmulatePage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.contactless, size: 64, color: colors.accent),
+          Icon(Icons.contactless_outlined, size: 64, color: colors.accent),
           const SizedBox(height: 16),
           Text(
             context.l10n.emuLoaded,

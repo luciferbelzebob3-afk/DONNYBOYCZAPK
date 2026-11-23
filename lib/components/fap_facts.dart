@@ -35,7 +35,7 @@ class FapFactsPanel extends StatelessWidget {
 
     if (!checked) {
       return _Note(
-        icon: Icons.sync,
+        icon: Icons.sync_outlined,
         text: pendingNote ?? strings.fapPendingNote,
         color: colors.textMuted,
         colors: colors,
@@ -51,7 +51,7 @@ class FapFactsPanel extends StatelessWidget {
 
     if (info == null) {
       return _Note(
-        icon: Icons.error_outline,
+        icon: Icons.error_outline_outlined,
         text: compat.message,
         color: colors.danger,
         colors: colors,
@@ -135,7 +135,9 @@ class _Verdict extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            blocking ? Icons.block : Icons.check_circle_outline,
+            blocking
+                ? Icons.block_outlined
+                : Icons.check_circle_outline_outlined,
             size: 16,
             color: color,
           ),

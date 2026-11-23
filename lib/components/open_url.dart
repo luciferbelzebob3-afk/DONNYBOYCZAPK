@@ -88,7 +88,10 @@ class _OpenUrlMenu extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: Icon(Icons.open_in_new, color: colors.textPrimary),
+            leading: Icon(
+              Icons.open_in_new_outlined,
+              color: colors.textPrimary,
+            ),
             title: Text(
               context.l10n.openInApp,
               style: TextStyle(color: colors.textPrimary),
@@ -99,7 +102,7 @@ class _OpenUrlMenu extends StatelessWidget {
             },
           ),
           ListTile(
-            leading: Icon(Icons.public, color: colors.textPrimary),
+            leading: Icon(Icons.public_outlined, color: colors.textPrimary),
             title: Text(
               context.l10n.openInBrowser,
               style: TextStyle(color: colors.textPrimary),

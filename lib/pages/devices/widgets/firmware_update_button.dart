@@ -1,4 +1,3 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flipperlib/flipperlib.dart';
 import 'package:flutter/material.dart';
 
@@ -8,7 +7,6 @@ import '../../../components/config.dart';
 import '../../../theme/theme.dart';
 import '../../../components/notification.dart';
 import '../../../components/progress_button.dart';
-import '../../../services/storage/picker_memory.dart';
 import '../device_scope.dart';
 import '../firmware/directory.dart';
 import '../firmware/installer.dart';
@@ -212,6 +210,7 @@ class _FirmwareUpdateButtonState extends State<FirmwareUpdateButton> {
   }
 
   Future<void> _startUpdate() async {
+    if (widget.entry.shortName != 'donnyboy' || _isCustom) return;
     if (!widget.client.isConnected && !_dfuPresent) {
       QNotification.show(
         context,
@@ -226,80 +225,12 @@ class _FirmwareUpdateButtonState extends State<FirmwareUpdateButton> {
     // this widget really depends on is the listening one in `build`. #407.
     final device = _dfuOnly ? DeviceScope.notifierOf(context) : null;
 
-    final FirmwareSource source;
-    if (_isCustom) {
-      final PlatformFile? file;
-      try {
-        file = await FilePicker.pickFile(
-          dialogTitle: l10n.fwuPickArchiveTitle,
-          type: FileType.custom,
-          allowedExtensions: const ['tgz', 'gz', 'tar'],
-          initialDirectory: await pickerStart(PickerPlace.firmware),
-        );
-      } catch (e, st) {
-        // A plugin that is missing or refuses on this platform rejects here,
-        // and this method is reached from a VoidCallback - so without a catch
-        // the rejection is discarded and lands in the log as [uncaught] with
-        // nothing naming it, while on screen the button just flicks back to
-        // enabled and no dialog ever appeared. The archive browser wraps the
-        // same API for the same reason.
-        LogService.error(
-          '[Firmware] the archive picker failed: ${LogService.describe(e, st)}',
-        );
-        if (!mounted) return;
-        QNotification.show(
-          context,
-          message: l10n.fwuAborted('$e'),
-          type: QNotificationType.error,
-        );
-        return;
-      }
-      // Cancelled. Genuinely nothing to report.
-      if (file == null) return;
-      // Separate from the cancel above, because it is not one: a file *was*
-      // chosen and came back without a usable path. `PlatformFile.path` is
-      // null for any URI that is not a `file:` one, which is how a Storage
-      // Access Framework pick Android could not resolve to disk arrives.
-      final picked = file.path;
-      if (picked == null) {
-        LogService.warn(
-          '[Firmware] the picker returned ${file.name} with no usable path; '
-          'nothing was flashed',
-        );
-        if (!mounted) return;
-        QNotification.show(
-          context,
-          message: l10n.fwuAborted('no usable path'),
-          type: QNotificationType.error,
-        );
-        return;
-      }
-      await rememberPickedFile(PickerPlace.firmware, picked);
-      // The picker is the one await here that can outlive this widget - the
-      // dialog is modal to the OS, not to Flutter, so the page behind it can be
-      // navigated away or rebuilt while it is open. Without this the setState
-      // below throws "setState() called after dispose()" from an async gap, and
-      // the flash starts anyway with nothing on screen to report it.
-      if (!mounted) {
-        // Said out loud: the archive was accepted and is being thrown away. If
-        // the page was merely rebuilt the button is sitting there looking
-        // ready, and "I picked the file and nothing happened" would otherwise
-        // arrive with no line for it anywhere.
-        LogService.warn(
-          '[Firmware] an archive was chosen but the button was gone before the '
-          'flash could start; nothing was written',
-        );
-        return;
-      }
-      source = LocalFirmwareSource(picked);
-    } else {
-      source = RemoteFirmwareSource(
-        entry: widget.entry,
-        channelId: widget.selectedChannelId,
-        target: 'f7',
-        variant: widget.selectedVariant,
-      );
-    }
+    final source = RemoteFirmwareSource(
+      entry: widget.entry,
+      channelId: widget.selectedChannelId,
+      target: 'f7',
+      variant: widget.selectedVariant,
+    );
 
     device?.setRecovering(true);
 
@@ -466,14 +397,12 @@ class _FirmwareUpdateButtonState extends State<FirmwareUpdateButton> {
       );
     }
 
-    if (_isCustom) {
+    if (_isCustom || widget.entry.shortName != 'donnyboy') {
       return _ResolvedButtonState(
-        label: l10n.fwuLabelInstall,
-        color: _activeColor,
-        description:
-            description ??
-            (_dfuOnly ? l10n.fwuDescPickDfu : l10n.fwuDescPickInstall),
-        enabled: true,
+        label: l10n.fwuLabelNoFirmware,
+        color: _inactiveColor,
+        description: 'Aplikace instaluje pouze firmware DONNY BOY CZ.',
+        enabled: false,
       );
     }
 

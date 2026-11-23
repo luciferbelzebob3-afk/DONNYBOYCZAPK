@@ -502,7 +502,7 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
         if (canDismiss) ...[
           _MapControl(
             colors: colors,
-            icon: Icons.arrow_back,
+            icon: Icons.arrow_back_outlined,
             tooltip: context.l10n.commonClose,
             onTap: () => Navigator.of(context).maybePop(),
           ),
@@ -530,14 +530,14 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
     return [
       _MapControl(
         colors: colors,
-        icon: Icons.place,
+        icon: Icons.place_outlined,
         label: '${_controller.pins.length}',
         onTap: null,
       ),
       const SizedBox(width: 8),
       _MapControl(
         colors: colors,
-        icon: Icons.my_location,
+        icon: Icons.my_location_outlined,
         tooltip: context.l10n.mapAutoCenter,
         active: _followingMe,
         onTap: _toggleAutoCenter,
@@ -545,7 +545,7 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
       const SizedBox(width: 8),
       _MapControl(
         colors: colors,
-        icon: Icons.settings_remote,
+        icon: Icons.settings_remote_outlined,
         tooltip: _controller.devicePosition != null
             ? context.l10n.mapTrackFlipper
             : context.l10n.mapNoDeviceLocation,
@@ -555,14 +555,14 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
       const SizedBox(width: 8),
       _MapControl(
         colors: colors,
-        icon: Icons.refresh,
+        icon: Icons.refresh_outlined,
         tooltip: context.l10n.mapReloadFiles,
         onTap: _controller.loading ? null : _controller.loadFiles,
       ),
       const SizedBox(width: 8),
       _MapControl(
         colors: colors,
-        icon: Icons.settings,
+        icon: Icons.settings_outlined,
         tooltip: context.l10n.mapSettingsEntry,
         onTap: () => openRoute(context, AppRoute.mapSettings),
       ),
@@ -574,14 +574,14 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
       children: [
         _MapControl(
           colors: colors,
-          icon: Icons.close,
+          icon: Icons.close_outlined,
           tooltip: context.l10n.commonCancel,
           onTap: _saving ? null : _exitPickMode,
         ),
         const Spacer(),
         _MapControl(
           colors: colors,
-          icon: Icons.check,
+          icon: Icons.check_outlined,
           label: context.l10n.mapSaveLocation,
           active: true,
           onTap: _saving ? null : _savePickedLocation,
@@ -774,7 +774,11 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
           Center(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 36),
-              child: Icon(Icons.location_on, size: 44, color: colors.accent),
+              child: Icon(
+                Icons.location_on_outlined,
+                size: 44,
+                color: colors.accent,
+              ),
             ),
           ),
           Center(
@@ -844,7 +848,7 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
             child: Transform.rotate(
               angle: bearing * 3.1415926 / 180,
               child: const Icon(
-                Icons.navigation,
+                Icons.navigation_outlined,
                 color: Colors.white,
                 size: 20,
               ),
@@ -869,7 +873,11 @@ class _FlipperMapPageState extends State<FlipperMapPage> {
                 BoxShadow(color: Colors.black38, blurRadius: 4),
               ],
             ),
-            child: const Icon(Icons.gps_fixed, color: Colors.white, size: 18),
+            child: const Icon(
+              Icons.gps_fixed_outlined,
+              color: Colors.white,
+              size: 18,
+            ),
           ),
         ),
       );

@@ -431,7 +431,9 @@ class _HoverTooltip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                info.isHi ? Icons.arrow_upward : Icons.arrow_downward,
+                info.isHi
+                    ? Icons.arrow_upward_outlined
+                    : Icons.arrow_downward_outlined,
                 size: 12,
                 color: Colors.white,
               ),
@@ -465,7 +467,10 @@ class _PlotHeader extends StatelessWidget {
     return Row(
       children: [
         if (frequencyHz > 0)
-          _Pill(icon: Icons.graphic_eq, label: _formatFrequency(frequencyHz)),
+          _Pill(
+            icon: Icons.graphic_eq_outlined,
+            label: _formatFrequency(frequencyHz),
+          ),
         const Spacer(),
         AnimatedBuilder(
           animation: controller,
@@ -546,7 +551,7 @@ class _ViewControls extends StatelessWidget {
               Row(
                 children: [
                   _RoundIconButton(
-                    icon: Icons.zoom_out,
+                    icon: Icons.zoom_out_outlined,
                     tooltip: l10n.plotZoomOut,
                     onPressed: () => controller.zoomBy(1 / 1.6),
                   ),
@@ -560,7 +565,7 @@ class _ViewControls extends StatelessWidget {
                     ),
                   ),
                   _RoundIconButton(
-                    icon: Icons.zoom_in,
+                    icon: Icons.zoom_in_outlined,
                     tooltip: l10n.plotZoomIn,
                     onPressed: () => controller.zoomBy(1.6),
                   ),
@@ -575,7 +580,7 @@ class _ViewControls extends StatelessWidget {
                 children: [
                   const SizedBox(width: 8),
                   Icon(
-                    Icons.swap_horiz,
+                    Icons.swap_horiz_outlined,
                     size: 18,
                     color: canPan ? colors.textMuted : colors.divider,
                   ),
@@ -675,7 +680,7 @@ class _SlicerControls extends StatelessWidget {
 
     final sliceButton = FilledButton.icon(
       onPressed: onSlice,
-      icon: const Icon(Icons.content_cut, size: 18),
+      icon: const Icon(Icons.content_cut_outlined, size: 18),
       label: Text(l10n.plotSlice),
       style: FilledButton.styleFrom(
         backgroundColor: colors.accent,
@@ -690,7 +695,7 @@ class _SlicerControls extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle(l10n.plotSlicer, icon: Icons.tune),
+          _SectionTitle(l10n.plotSlicer, icon: Icons.tune_outlined),
           const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -820,7 +825,10 @@ class _ModulationCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle(l10n.plotDetectedModulation, icon: Icons.auto_awesome),
+          _SectionTitle(
+            l10n.plotDetectedModulation,
+            icon: Icons.auto_awesome_outlined,
+          ),
           const SizedBox(height: 8),
           Text(
             report.modulationName,
@@ -903,7 +911,7 @@ class _HistogramTable extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle(l10n.plotHistogram, icon: Icons.bar_chart),
+          _SectionTitle(l10n.plotHistogram, icon: Icons.bar_chart_outlined),
           const SizedBox(height: 8),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -991,9 +999,13 @@ class _BitsCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _SectionTitle(l10n.plotDecodedBits, icon: Icons.tag),
+                child: _SectionTitle(
+                  l10n.plotDecodedBits,
+                  icon: Icons.tag_outlined,
+                ),
               ),
-              if (bits.isNotEmpty) _CopyButton(value: bits, label: l10n.hexBits),
+              if (bits.isNotEmpty)
+                _CopyButton(value: bits, label: l10n.hexBits),
             ],
           ),
           const SizedBox(height: 10),
@@ -1003,7 +1015,7 @@ class _BitsCard extends StatelessWidget {
           ),
           if (rfRawRx != null || rfRawTx != null) ...[
             const SizedBox(height: 16),
-            const _SectionTitle('RfRaw', icon: Icons.cell_tower),
+            const _SectionTitle('RfRaw', icon: Icons.cell_tower_outlined),
             const SizedBox(height: 10),
             if (rfRawRx != null) _RfRawRow(label: 'rx', value: rfRawRx!),
             if (rfRawTx != null) ...[

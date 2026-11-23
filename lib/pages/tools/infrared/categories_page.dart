@@ -195,7 +195,7 @@ class _IrdbButton extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right, color: colors.textMuted),
+                Icon(Icons.chevron_right_outlined, color: colors.textMuted),
               ],
             ),
           ),
@@ -241,7 +241,11 @@ class _DeviceCategoryCard extends StatelessWidget {
                   ),
                 )
               else
-                Icon(Icons.error_outline, size: 36, color: colors.textPrimary),
+                Icon(
+                  Icons.error_outline_outlined,
+                  size: 36,
+                  color: colors.textPrimary,
+                ),
               const SizedBox(height: 8),
               Text(
                 category.displayName,
@@ -294,7 +298,7 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off, size: 44, color: colors.danger),
+            Icon(Icons.cloud_off_outlined, size: 44, color: colors.danger),
             const SizedBox(height: 12),
             Text(
               message,

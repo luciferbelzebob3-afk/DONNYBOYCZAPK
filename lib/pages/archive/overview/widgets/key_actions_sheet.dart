@@ -113,7 +113,7 @@ class KeyActionsSheet {
     if (k.state == ArchiveKeyState.deleted) {
       actions.add(
         ActionItem(
-          icon: Icons.restore,
+          icon: Icons.restore_outlined,
           label: context.l10n.archiveRestore,
           onTap: () async {
             // No pre-check of its own. The controller refuses a restore with
@@ -134,7 +134,7 @@ class KeyActionsSheet {
     if (!k.isDeleted && k.category.emulatable) {
       actions.add(
         ActionItem(
-          icon: Icons.play_arrow,
+          icon: Icons.play_arrow_outlined,
           label: context.l10n.fileEmulate,
           onTap: () => emulateOnFlipper(context, k),
         ),
@@ -145,7 +145,7 @@ class KeyActionsSheet {
         k.launchMethod == LaunchMethod.rpc) {
       actions.add(
         ActionItem(
-          icon: Icons.add_to_home_screen,
+          icon: Icons.add_to_home_screen_outlined,
           label: context.l10n.homeWidgetPin,
           onTap: () => _pinToHomeScreen(context, k),
         ),
@@ -154,7 +154,7 @@ class KeyActionsSheet {
     if (!k.isDeleted && k.category.plottable) {
       actions.add(
         ActionItem(
-          icon: Icons.show_chart,
+          icon: Icons.show_chart_outlined,
           label: context.l10n.archivePlotter,
           onTap: () => _openInPlotter(context, controller, k),
         ),
@@ -186,7 +186,7 @@ class KeyActionsSheet {
     if (k.onDevice && connected) {
       actions.add(
         ActionItem(
-          icon: Icons.folder_open,
+          icon: Icons.folder_open_outlined,
           label: context.l10n.archiveReveal,
           onTap: () => _openInFileManager(context, k),
         ),
@@ -195,13 +195,15 @@ class KeyActionsSheet {
     if ((k.onDevice && connected) || (hasLocal && !isImage)) {
       actions.add(
         ActionItem(
-          icon: Icons.edit_note,
+          icon: Icons.edit_note_outlined,
           label: context.l10n.fileEdit,
           onTap: () => _openInEditor(context, controller, k),
         ),
       );
     }
-    final shareIcon = isShareSupported ? Icons.ios_share : Icons.content_copy;
+    final shareIcon = isShareSupported
+        ? Icons.ios_share_outlined
+        : Icons.content_copy_outlined;
     final shareLabel = isShareSupported
         ? context.l10n.shareShare
         : context.l10n.fmCopy;
@@ -250,7 +252,7 @@ class KeyActionsSheet {
     if (keys.isNotEmpty && keys.every((k) => k.isDeleted)) {
       return [
         ActionItem(
-          icon: Icons.delete_forever,
+          icon: Icons.delete_forever_outlined,
           label: context.l10n.commonDelete,
           destructive: true,
           onTap: () => confirmAndDelete(
@@ -285,7 +287,7 @@ class KeyActionsSheet {
         ),
       if (canDeleteRemote)
         ActionItem(
-          icon: Icons.delete_forever,
+          icon: Icons.delete_forever_outlined,
           label: context.l10n.archiveDeleteRemote,
           destructive: true,
           onTap: () => confirmAndDelete(

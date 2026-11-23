@@ -209,9 +209,9 @@ class _CategoryPageState extends State<CategoryPage>
   }
 
   IconData _emptyIcon() {
-    if (_hasFilter) return Icons.search_off;
-    if (!_ctrl.isConnected) return Icons.link_off;
-    return Icons.folder_open;
+    if (_hasFilter) return Icons.search_off_outlined;
+    if (!_ctrl.isConnected) return Icons.link_off_outlined;
+    return Icons.folder_open_outlined;
   }
 
   String _emptyActionLabel() {

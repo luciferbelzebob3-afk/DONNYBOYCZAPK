@@ -86,7 +86,7 @@ class RemoteActionBar extends StatelessWidget {
                 _Pill(
                   scale: scale,
                   width: RemoteActionBarGeometry.pillHeight,
-                  icon: Icons.search,
+                  icon: Icons.search_outlined,
                   tooltip: context.l10n.connectSearch,
                   onTap: onConnection,
                 ),

@@ -112,14 +112,14 @@ class _IrLibPageState extends State<IrLibPage> {
               foregroundColor: colors.onAccent,
               leading: _ctrl.canGoUp
                   ? IconButton(
-                      icon: const Icon(Icons.arrow_back),
+                      icon: const Icon(Icons.arrow_back_outlined),
                       onPressed: () => _ctrl.goUp(),
                     )
                   : null,
               actions: [
                 IconButton(
                   tooltip: context.l10n.irRefresh,
-                  icon: const Icon(Icons.refresh),
+                  icon: const Icon(Icons.refresh_outlined),
                   onPressed: _ctrl.loading ? null : _ctrl.refresh,
                 ),
                 IconButton(
@@ -344,7 +344,9 @@ class _IrEntryCard extends StatelessWidget {
                   ),
                 ),
                 Icon(
-                  entry.isDir ? Icons.chevron_right : Icons.download_outlined,
+                  entry.isDir
+                      ? Icons.chevron_right_outlined
+                      : Icons.download_outlined,
                   color: colors.textMuted,
                   size: 22,
                 ),
@@ -379,7 +381,7 @@ class _EmptyView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.folder_open, size: 48, color: colors.textMuted),
+            Icon(Icons.folder_open_outlined, size: 48, color: colors.textMuted),
             const SizedBox(height: 12),
             Text(
               title,
@@ -419,7 +421,7 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off, size: 44, color: colors.danger),
+            Icon(Icons.cloud_off_outlined, size: 44, color: colors.danger),
             const SizedBox(height: 12),
             Text(
               message,
@@ -427,7 +429,10 @@ class _ErrorView extends StatelessWidget {
               style: TextStyle(color: colors.textPrimary),
             ),
             const SizedBox(height: 14),
-            FilledButton(onPressed: onRetry, child: Text(context.l10n.commonRetry)),
+            FilledButton(
+              onPressed: onRetry,
+              child: Text(context.l10n.commonRetry),
+            ),
           ],
         ),
       ),

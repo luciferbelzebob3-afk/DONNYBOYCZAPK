@@ -41,7 +41,7 @@ class QCancelSpinner extends StatelessWidget {
               SizedBox.expand(
                 child: CircularProgressIndicator(strokeWidth: 2, color: tint),
               ),
-              Icon(Icons.close, size: size * 0.52, color: tint),
+              Icon(Icons.close_outlined, size: size * 0.52, color: tint),
             ],
           ),
         ),

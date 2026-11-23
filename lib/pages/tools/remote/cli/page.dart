@@ -402,7 +402,7 @@ class _CliPageState extends State<CliPage> {
           QPageAppBarAction(
             tooltip: context.l10n.commonClear,
             onPressed: _clearOutput,
-            icon: const Icon(Icons.delete_outline),
+            icon: const Icon(Icons.delete_outline_outlined),
           ),
         ],
       ),

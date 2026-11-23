@@ -63,7 +63,10 @@ FileVisual fileVisualFor(RemoteEntry e, QAppColors colors) {
     case 'xml':
     case 'yaml':
     case 'yml':
-      return FileVisual(icon: Icons.code, color: FileTypeColor.code.color);
+      return FileVisual(
+        icon: Icons.code_outlined,
+        color: FileTypeColor.code.color,
+      );
     case 'png':
     case 'jpg':
     case 'jpeg':
@@ -80,7 +83,7 @@ FileVisual fileVisualFor(RemoteEntry e, QAppColors colors) {
     case 'ogg':
     case 'flac':
       return FileVisual(
-        icon: Icons.audiotrack,
+        icon: Icons.audiotrack_outlined,
         color: FileTypeColor.audio.color,
       );
     case 'zip':
@@ -97,7 +100,10 @@ FileVisual fileVisualFor(RemoteEntry e, QAppColors colors) {
     case 'elf':
     case 'dfu':
     case 'fuf':
-      return FileVisual(icon: Icons.memory, color: FileTypeColor.binary.color);
+      return FileVisual(
+        icon: Icons.memory_outlined,
+        color: FileTypeColor.binary.color,
+      );
     default:
       return FileVisual(
         asset: '$_kFileIcon/default.svg',

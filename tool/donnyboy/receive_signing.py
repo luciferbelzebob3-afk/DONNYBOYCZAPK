@@ -53,6 +53,15 @@ def main():
         f'export {name}={shlex.quote(props[key])}' for name, key in names.items()) + '\n')
     for file in destination.iterdir():
         file.chmod(0o600)
+    props = dict(line.split('=', 1) for line in
+                 (destination / 'key.properties').read_text().splitlines() if '=' in line)
+    variables = {
+        'DONNYBOY_STORE_PASSWORD': props['storePassword'],
+        'DONNYBOY_KEY_ALIAS': props['keyAlias'],
+        'DONNYBOY_KEY_PASSWORD': props['keyPassword'],
+    }
+    (destination / 'transfer.env').write_text(''.join(
+        f'export {name}={shlex.quote(value)}\n' for name, value in variables.items()))
     print('Přijat zašifrovaný původní podpisový klíč pro toto sestavení.')
 
 
